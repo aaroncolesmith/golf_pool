@@ -445,7 +445,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
           return {
             ok: true,
-            message: `Magic link sent to ${normalizedEmail}.`,
+            message: "Check your email for your sign-up link.",
+            detail: `We sent a secure sign-in link to ${normalizedEmail}. It will create your account and bring you back into the pool.`,
           };
         }
 
@@ -469,6 +470,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return {
           ok: true,
           message: `Complete registration for ${link.email}`,
+          detail: "Magic-link preview mode is enabled for this environment.",
           previewHref: `/auth/callback?token=${link.token}`,
         };
       },
@@ -494,7 +496,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
           return {
             ok: true,
-            message: `Magic link sent to ${normalizedEmail}.`,
+            message: "Check your email for your login link.",
+            detail: `We sent a secure sign-in link to ${normalizedEmail}. Use it on this device to continue.`,
           };
         }
 
@@ -512,6 +515,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return {
           ok: true,
           message: `Sign in as ${link.email}`,
+          detail: "Magic-link preview mode is enabled for this environment.",
           previewHref: `/auth/callback?token=${link.token}`,
         };
       },

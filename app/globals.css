@@ -1001,10 +1001,35 @@ button:disabled {
 }
 
 .notice {
-  border: 1px solid rgba(28, 110, 231, 0.18);
-  background: rgba(28, 110, 231, 0.08);
+  display: grid;
+  gap: 8px;
   border-radius: 20px;
   padding: 16px;
+}
+
+.notice p,
+.notice strong {
+  margin: 0;
+}
+
+.notice-success {
+  border: 1px solid rgba(28, 110, 231, 0.18);
+  background: rgba(28, 110, 231, 0.08);
+}
+
+.notice-error {
+  border: 1px solid rgba(189, 54, 47, 0.18);
+  background: rgba(189, 54, 47, 0.08);
+}
+
+.auth-footnote {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+
+.auth-footnote p {
+  margin: 0;
 }
 
 .empty-state {

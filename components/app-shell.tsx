@@ -4,9 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { buildLeaderboard } from "@/lib/scoring";
+import { magicLinkPreviewEnabled } from "@/lib/supabase/config";
 import { useAppState } from "@/lib/store";
 import { LeaderboardRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+type AuthNotice = {
+  ok: boolean;
+  title: string;
+  message: string;
+  detail?: string;
+  href?: string | null;
+};
 
 function rankLabel(rows: LeaderboardRow[], userId: string) {
   const index = rows.findIndex((row) => row.userId === userId);
@@ -17,7 +26,7 @@ export function AppShell() {
   const router = useRouter();
   const { state, currentUser, logout, joinPool, register, login, isUsingSupabase } = useAppState();
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
-  const [authMessage, setAuthMessage] = useState<{ label: string; href: string } | null>(null);
+  const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [dashboardMessage, setDashboardMessage] = useState<string | null>(null);
@@ -28,17 +37,23 @@ export function AppShell() {
     if (authMode === "register") {
       const userName = String(formData.get("userName") ?? "");
       const result = await register(userName, email);
-      setAuthMessage({
-        label: result.message,
-        href: result.previewHref ?? "/",
+      setAuthNotice({
+        ok: result.ok,
+        title: result.ok ? "Check your inbox" : "We couldn't send that link",
+        message: result.message,
+        detail: result.detail,
+        href: result.previewHref,
       });
       return;
     }
 
     const result = await login(email);
-    setAuthMessage({
-      label: result.message,
-      href: result.previewHref ?? "/",
+    setAuthNotice({
+      ok: result.ok,
+      title: result.ok ? "Check your inbox" : "We couldn't send that link",
+      message: result.message,
+      detail: result.detail,
+      href: result.previewHref,
     });
   }
 
@@ -74,20 +89,26 @@ export function AppShell() {
           <article className="auth-card panel">
             <div className="panel-header">
               <h2>Sign In</h2>
-              <span className="panel-kicker">Register or log in</span>
+              <span className="panel-kicker">Email access</span>
             </div>
             <div className="tabs">
               <button
                 className={cn("tab", authMode === "register" && "active")}
                 type="button"
-                onClick={() => setAuthMode("register")}
+                onClick={() => {
+                  setAuthMode("register");
+                  setAuthNotice(null);
+                }}
               >
                 Register
               </button>
               <button
                 className={cn("tab", authMode === "login" && "active")}
                 type="button"
-                onClick={() => setAuthMode("login")}
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthNotice(null);
+                }}
               >
                 Log in
               </button>
@@ -104,16 +125,26 @@ export function AppShell() {
                 <input name="email" type="email" placeholder="you@example.com" required />
               </label>
               <button className="primary-button" type="submit">
-                {authMode === "register" ? "Send sign-up link" : "Send login link"}
+                {authMode === "register" ? "Create account" : "Email me a sign-in link"}
               </button>
             </form>
-            {authMessage ? (
-              <div className="notice">
-                <p>{authMessage.label}</p>
-                {!isUsingSupabase ? <Link href={authMessage.href}>Open magic link</Link> : null}
+            {authNotice ? (
+              <div className={cn("notice", authNotice.ok ? "notice-success" : "notice-error")}>
+                <strong>{authNotice.title}</strong>
+                <p>{authNotice.message}</p>
+                {authNotice.detail ? <p className="muted small">{authNotice.detail}</p> : null}
+                {!isUsingSupabase && magicLinkPreviewEnabled && authNotice.href ? <Link href={authNotice.href}>Open preview link</Link> : null}
               </div>
             ) : (
-              <p className="muted">For now the prototype exposes the magic link in-app instead of sending a real email.</p>
+              <div className="auth-footnote">
+                <p className="muted">
+                  {isUsingSupabase
+                    ? "We’ll email you a secure one-time link. No password required."
+                    : magicLinkPreviewEnabled
+                      ? "Preview mode is enabled for this environment so you can test the email-link flow locally."
+                      : "Email delivery is not configured for this environment yet."}
+                </p>
+              </div>
             )}
           </article>
         </section>

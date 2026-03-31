@@ -46,6 +46,7 @@ export type User = {
 export type AuthResult = {
   ok: boolean;
   message: string;
+  detail?: string;
   previewHref?: string | null;
 };
 

@@ -31,16 +31,23 @@ export function AuthCallback() {
   return (
     <main className="centered-page">
       <div className="panel callback-panel">
-        <p className="eyebrow">Magic Link</p>
+        <p className="eyebrow">Email Sign-In</p>
         <h1>
           {isUsingSupabase
-            ? "Supabase auth is enabled. Email links are confirmed through /auth/confirm."
+            ? "Your email link has been confirmed."
             : userName
-              ? `You are signed in as ${userName}`
-              : "That magic link is no longer valid."}
+              ? `You are signed in as ${userName}.`
+              : "That sign-in link is no longer valid."}
         </h1>
+        <p className="muted">
+          {isUsingSupabase
+            ? "You can close this tab and return to the app, or continue straight to your dashboard."
+            : userName
+              ? "Your session is active on this device."
+              : "Request a fresh email link to continue."}
+        </p>
         <Link className="primary-button" href="/">
-          Return home
+          Continue
         </Link>
       </div>
     </main>
