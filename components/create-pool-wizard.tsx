@@ -91,12 +91,11 @@ function getTierBoundaries(tiers: Tier[]) {
 
 export function CreatePoolWizard() {
   const router = useRouter();
-  const { state, currentUser, createPool, inviteEmails, importTournamentFeed } = useAppState();
+  const { state, currentUser, createPool, importTournamentFeed } = useAppState();
   const [createStep, setCreateStep] = useState<1 | 2 | 3>(1);
   const [selectedTournamentId, setSelectedTournamentId] = useState(state.tournaments[0]?.id ?? "");
   const [draftTiers, setDraftTiers] = useState<Tier[]>([]);
   const [poolName, setPoolName] = useState("");
-  const [inviteInput, setInviteInput] = useState("alex@example.com,morgan@example.com");
   const [poolMessage, setPoolMessage] = useState<string | null>(null);
   const [importOptions, setImportOptions] = useState<UpcomingTournamentOption[]>([]);
   const [selectedImportSlug, setSelectedImportSlug] = useState("");
@@ -257,16 +256,6 @@ export function CreatePoolWizard() {
         return;
       }
 
-      if (inviteInput.trim()) {
-        await inviteEmails(
-          pool.id,
-          inviteInput
-            .split(",")
-            .map((email) => email.trim())
-            .filter(Boolean),
-        );
-      }
-
       router.push(`/pools/${pool.id}`);
     } catch (error) {
       setPoolMessage(error instanceof Error ? error.message : "Unable to create pool.");
@@ -359,7 +348,7 @@ export function CreatePoolWizard() {
         </div>
 
         <div className={cn("create-layout", createStep === 1 && "step-one-layout", createStep === 2 && "step-two-layout")}>
-          <div className={cn("create-sidebar stack", (createStep === 1 || createStep === 2) && "create-sidebar-hidden")}>
+          <div className={cn("create-sidebar stack", "create-sidebar-hidden")}>
             {createStep === 2 ? (
               <>
                 <div className="notice">
@@ -393,49 +382,7 @@ export function CreatePoolWizard() {
               </>
             ) : null}
 
-            {createStep === 3 ? (
-              <>
-                <div className="notice">
-                  <p>Name the pool, add invite emails, and publish it for your group.</p>
-                </div>
-                <label className="field">
-                  <span>Pool name</span>
-                  <input value={poolName} onChange={(event) => setPoolName(event.target.value)} />
-                </label>
-
-                <label className="field">
-                  <span>Invite emails</span>
-                  <textarea rows={4} value={inviteInput} onChange={(event) => setInviteInput(event.target.value)} />
-                </label>
-
-                <div className="wizard-summary">
-                  <div className="wizard-stat">
-                    <span className="summary-label">Tournament</span>
-                    <strong>{selectedTournament?.name ?? "Not selected"}</strong>
-                  </div>
-                  <div className="wizard-stat">
-                    <span className="summary-label">Lock time</span>
-                    <strong>{selectedTournament ? formatDate(selectedTournament.startDate) : "TBD"}</strong>
-                  </div>
-                  <div className="wizard-stat">
-                    <span className="summary-label">Tiers</span>
-                    <strong>{draftTiers.length}</strong>
-                  </div>
-                </div>
-
-                <div className="draft-actions">
-                  <button className="secondary-button" type="button" onClick={() => setCreateStep(2)}>
-                    Back to tiers
-                  </button>
-                  <button className="primary-button" type="button" onClick={handleCreatePool}>
-                    Create pool
-                  </button>
-                </div>
-              </>
-            ) : null}
-
             {createStep !== 1 && importMessage ? <p className="muted small">{importMessage}</p> : null}
-            {createStep !== 1 && poolMessage ? <div className="notice"><p>{poolMessage}</p></div> : null}
           </div>
 
           <div className={cn("create-main", createStep === 1 && "create-main-card", createStep === 2 && "create-main-tier")}>
@@ -574,6 +521,14 @@ export function CreatePoolWizard() {
 
             {createStep === 3 ? (
               <div className="wizard-stage-card">
+                <label className="field">
+                  <span>Pool name</span>
+                  <input
+                    value={poolName}
+                    onChange={(event) => setPoolName(event.target.value)}
+                    placeholder="e.g. Valero Texas Open Pool"
+                  />
+                </label>
                 <div className="wizard-review-grid">
                   <div className="wizard-review-block">
                     <span className="summary-label">Tournament</span>
@@ -593,10 +548,19 @@ export function CreatePoolWizard() {
                     <span className="summary-label">Pool details</span>
                     <strong>{poolName || "Untitled pool"}</strong>
                     <p className="muted small">
-                      {inviteInput.trim() ? inviteInput.split(",").filter(Boolean).length : 0} invite emails queued.
+                      The commissioner is automatically added when the pool is created.
                     </p>
                   </div>
                 </div>
+                <div className="draft-actions">
+                  <button className="secondary-button" type="button" onClick={() => setCreateStep(2)}>
+                    Back to tiers
+                  </button>
+                  <button className="primary-button" type="button" onClick={handleCreatePool}>
+                    Create pool
+                  </button>
+                </div>
+                {poolMessage ? <div className="notice"><p>{poolMessage}</p></div> : null}
               </div>
             ) : null}
           </div>
