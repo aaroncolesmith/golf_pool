@@ -67,6 +67,18 @@ type RemoteGolferRow = {
   rounds_complete: number;
 };
 
+type JoinedPoolRow = {
+  id: string;
+  name: string;
+  tournament_id: string;
+  admin_user_id: string;
+  join_code: string;
+  invited_emails: string[] | null;
+  created_at: string;
+  lock_at: string;
+  tiers: Tier[] | null;
+};
+
 type StorageLike = {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
@@ -676,23 +688,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         const supabase = await getSafeSupabaseBrowserClient();
         if (supabase) {
-          const { data: pool } = await supabase
-            .from("pools")
-            .select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers")
-            .eq("join_code", normalizedCode)
+          const { data: pool, error } = await supabase
+            .rpc("join_pool_by_code", { input_code: normalizedCode })
+            .returns<JoinedPoolRow[]>()
             .single();
 
-          if (!pool) {
+          if (error || !pool) {
             return null;
           }
-
-          await supabase.from("pool_members").upsert(
-            {
-              pool_id: pool.id,
-              user_id: currentUser.id,
-            },
-            { onConflict: "pool_id,user_id", ignoreDuplicates: true },
-          );
 
           await refreshRemoteState();
 

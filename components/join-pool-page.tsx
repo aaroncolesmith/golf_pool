@@ -1,27 +1,39 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useAppState } from "@/lib/store";
 
 export function JoinPoolPage({ code }: { code: string }) {
-  const { state, currentUser, joinPool } = useAppState();
-  const pool = useMemo(() => state.pools.find((candidate) => candidate.joinCode === code.toUpperCase()), [code, state.pools]);
+  const router = useRouter();
+  const { currentUser, joinPool } = useAppState();
+  const [joinMessage, setJoinMessage] = useState<string | null>(null);
+
+  async function handleJoin() {
+    setJoinMessage(null);
+    const pool = await joinPool(code);
+
+    if (!pool) {
+      setJoinMessage("Unable to join this pool with that code yet.");
+      return;
+    }
+
+    router.push(`/pools/${pool.id}`);
+  }
 
   return (
     <main className="centered-page">
       <div className="panel callback-panel">
         <p className="eyebrow">Join Pool</p>
-        <h1>{pool ? pool.name : "Pool not found"}</h1>
-        {pool ? <p className="muted">Code: {pool.joinCode}</p> : null}
-        {currentUser && pool ? (
+        <h1>Join with code {code.toUpperCase()}</h1>
+        <p className="muted">Use this invite code to add the pool to your dashboard.</p>
+        {currentUser ? (
           <>
-            <button className="primary-button" onClick={() => joinPool(code)} type="button">
+            <button className="primary-button" onClick={handleJoin} type="button">
               Join as {currentUser.userName}
             </button>
-            <Link className="secondary-button" href={`/pools/${pool.id}`}>
-              Open pool
-            </Link>
+            {joinMessage ? <p className="muted">{joinMessage}</p> : null}
           </>
         ) : (
           <p className="muted">Sign in first to join this pool.</p>

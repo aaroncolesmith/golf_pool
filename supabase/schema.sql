@@ -115,6 +115,60 @@ as $$
   );
 $$;
 
+create or replace function public.join_pool_by_code(input_code text)
+returns table (
+  id uuid,
+  name text,
+  tournament_id text,
+  admin_user_id uuid,
+  join_code text,
+  invited_emails text[],
+  created_at timestamptz,
+  lock_at timestamptz,
+  tiers jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  normalized_code text := upper(trim(input_code));
+  target_pool public.pools%rowtype;
+begin
+  if auth.uid() is null then
+    return;
+  end if;
+
+  select *
+  into target_pool
+  from public.pools
+  where pools.join_code = normalized_code
+  limit 1;
+
+  if not found then
+    return;
+  end if;
+
+  insert into public.pool_members (pool_id, user_id)
+  values (target_pool.id, auth.uid())
+  on conflict (pool_id, user_id) do nothing;
+
+  return query
+  select
+    target_pool.id,
+    target_pool.name,
+    target_pool.tournament_id,
+    target_pool.admin_user_id,
+    target_pool.join_code,
+    target_pool.invited_emails,
+    target_pool.created_at,
+    target_pool.lock_at,
+    target_pool.tiers;
+end;
+$$;
+
+grant execute on function public.join_pool_by_code(text) to authenticated;
+
 drop trigger if exists pool_entries_set_updated_at on public.pool_entries;
 create trigger pool_entries_set_updated_at
   before update on public.pool_entries
