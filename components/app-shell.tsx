@@ -24,7 +24,7 @@ function rankLabel(rows: LeaderboardRow[], userId: string) {
 
 export function AppShell() {
   const router = useRouter();
-  const { state, currentUser, logout, joinPool, register, login, isUsingSupabase } = useAppState();
+  const { state, currentUser, logout, joinPool, register, login, isUsingSupabase, isReady } = useAppState();
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
   const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
   const [joinCode, setJoinCode] = useState("");
@@ -67,6 +67,18 @@ export function AppShell() {
     setDashboardMessage(`Joined ${pool.name}.`);
     setJoinCode("");
     router.push(`/pools/${pool.id}`);
+  }
+
+  if (!isReady) {
+    return (
+      <main className="centered-page">
+        <div className="panel callback-panel">
+          <p className="eyebrow">Loading</p>
+          <h1>Checking your account access.</h1>
+          <p className="muted">We’re refreshing your session before showing any pool data.</p>
+        </div>
+      </main>
+    );
   }
 
   if (!currentUser) {

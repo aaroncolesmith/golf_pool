@@ -22,6 +22,7 @@ type AppContextValue = {
   state: AppState;
   currentUser: User | null;
   isUsingSupabase: boolean;
+  isReady: boolean;
   register: (userName: string, email: string) => Promise<AuthResult>;
   login: (email: string) => Promise<AuthResult>;
   consumeMagicLink: (token: string) => Promise<User | null>;
@@ -200,6 +201,17 @@ function readInitialState(): AppState {
   }
 }
 
+function createSupabaseShellState(): AppState {
+  return {
+    ...initialState,
+    users: [],
+    currentUserId: null,
+    pools: [],
+    entries: [],
+    pendingMagicLinks: [],
+  };
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(initialState);
   const [hydrated, setHydrated] = useState(false);
@@ -213,6 +225,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     async function loadRemoteState() {
+      setHydrated(false);
+      setState(createSupabaseShellState());
+
       const supabase = await getSafeSupabaseBrowserClient();
       if (!supabase) {
         setHydrated(true);
@@ -420,6 +435,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       state,
       currentUser,
       isUsingSupabase: usingSupabase,
+      isReady: hydrated,
       async register(userName, email) {
         const supabase = await getSafeSupabaseBrowserClient();
         if (supabase) {

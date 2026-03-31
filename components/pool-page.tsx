@@ -9,7 +9,7 @@ import { TeamSelection } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 export function PoolPage({ poolId }: { poolId: string }) {
-  const { state, currentUser, updatePoolTiers, saveEntry, inviteEmails } = useAppState();
+  const { state, currentUser, updatePoolTiers, saveEntry, inviteEmails, isReady } = useAppState();
   const pool = state.pools.find((candidate) => candidate.id === poolId);
   const tournament = state.tournaments.find((candidate) => candidate.id === pool?.tournamentId);
   const golfers = state.golfers.filter((candidate) => candidate.tournamentId === tournament?.id);
@@ -25,6 +25,17 @@ export function PoolPage({ poolId }: { poolId: string }) {
   useEffect(() => {
     setSelections(existingEntry?.selections ?? []);
   }, [existingEntry]);
+
+  if (!isReady) {
+    return (
+      <main className="centered-page">
+        <div className="panel callback-panel">
+          <h1>Checking access</h1>
+          <p className="muted">We’re refreshing your membership before loading this pool.</p>
+        </div>
+      </main>
+    );
+  }
 
   if (!pool || !tournament) {
     return (
@@ -47,6 +58,21 @@ export function PoolPage({ poolId }: { poolId: string }) {
   const isAdmin = currentUser?.id === currentPool.adminUserId;
   const isMember = currentUser ? currentPool.memberUserIds.includes(currentUser.id) : false;
   const isLocked = isPoolLocked(currentPool);
+
+  if (!currentUser || (!isAdmin && !isMember)) {
+    return (
+      <main className="centered-page">
+        <div className="panel callback-panel">
+          <p className="eyebrow">Restricted</p>
+          <h1>This pool is only visible to joined members.</h1>
+          <p className="muted">Join from a valid invite link or enter the join code from your dashboard.</p>
+          <Link className="primary-button" href="/">
+            Return home
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   function updateSelection(tierId: string, golferId: string) {
     setDraftMessage(null);
@@ -189,9 +215,11 @@ export function PoolPage({ poolId }: { poolId: string }) {
                   <p className="muted small">
                     {row.status === "eliminated"
                       ? "Eliminated: fewer than four golfers made the cut."
-                      : row.countingGolfers.map((golfer) => `${golfer.name} (${golfer.currentScoreToPar})`).join(", ")}
+                      : currentUser?.id === row.userId
+                        ? row.countingGolfers.map((golfer) => `${golfer.name} (${golfer.currentScoreToPar})`).join(", ")
+                        : "Picks are private until you view your own entry."}
                   </p>
-                  {row.benchGolfers.length > 0 ? (
+                  {currentUser?.id === row.userId && row.benchGolfers.length > 0 ? (
                     <p className="muted small">
                       Bench: {row.benchGolfers.map((golfer) => `${golfer.name} (${golfer.position})`).join(", ")}
                     </p>
