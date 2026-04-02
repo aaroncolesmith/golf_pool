@@ -139,9 +139,9 @@ export const sampleEntries: PoolEntry[] = [
 export const initialState: AppState = {
   users: sampleUsers,
   currentUserId: null,
-  pendingMagicLinks: [],
   tournaments: sampleTournaments,
   golfers: sampleGolfers,
   pools: samplePools,
   entries: sampleEntries,
+  scoresLastSyncedAt: null,
 };

@@ -347,7 +347,7 @@ export function CreatePoolWizard() {
           </div>
         </div>
 
-        <div className={cn("create-layout", createStep === 1 && "step-one-layout", createStep === 2 && "step-two-layout")}>
+        <div className={cn("create-layout", (createStep === 1 || createStep === 3) && "step-one-layout", createStep === 2 && "step-two-layout")}>
           <div className={cn("create-sidebar stack", "create-sidebar-hidden")}>
             {createStep === 2 ? (
               <>
@@ -531,25 +531,30 @@ export function CreatePoolWizard() {
                 </label>
                 <div className="wizard-review-grid">
                   <div className="wizard-review-block">
-                    <span className="summary-label">Tournament</span>
-                    <strong>{selectedTournament?.name ?? "Not selected"}</strong>
-                    <p className="muted small">
-                      {selectedTournament ? formatDate(selectedTournament.startDate) : "Tournament still needs to be selected."}
-                    </p>
+                    <span style={{ fontSize: "1.5rem", flexShrink: 0 }}>🏌️</span>
+                    <div className="wizard-review-text">
+                      <span className="summary-label">Tournament</span>
+                      <strong>{selectedTournament?.name ?? "Not selected"}</strong>
+                      <p className="muted small">
+                        {selectedTournament ? formatDate(selectedTournament.startDate) : "No tournament selected."}
+                      </p>
+                    </div>
                   </div>
                   <div className="wizard-review-block">
-                    <span className="summary-label">Tier setup</span>
-                    <strong>{draftTiers.length} tiers ready</strong>
-                    <p className="muted small">
-                      {draftTiers.reduce((count, tier) => count + tier.golferIds.length, 0)} golfers distributed across the board.
-                    </p>
+                    <span style={{ fontSize: "1.5rem", flexShrink: 0 }}>⛳</span>
+                    <div className="wizard-review-text">
+                      <span className="summary-label">Field &amp; tiers</span>
+                      <strong>{draftTiers.length} tiers · {draftTiers.reduce((n, t) => n + t.golferIds.length, 0)} golfers</strong>
+                      <p className="muted small">Tier boundaries set — adjust from Admin tab after creation.</p>
+                    </div>
                   </div>
                   <div className="wizard-review-block">
-                    <span className="summary-label">Pool details</span>
-                    <strong>{poolName || "Untitled pool"}</strong>
-                    <p className="muted small">
-                      The commissioner is automatically added when the pool is created.
-                    </p>
+                    <span style={{ fontSize: "1.5rem", flexShrink: 0 }}>🏆</span>
+                    <div className="wizard-review-text">
+                      <span className="summary-label">Pool name</span>
+                      <strong>{poolName || "Untitled pool"}</strong>
+                      <p className="muted small">You&apos;ll be added as commissioner automatically.</p>
+                    </div>
                   </div>
                 </div>
                 <div className="draft-actions">

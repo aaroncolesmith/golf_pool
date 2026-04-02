@@ -1,15 +1,24 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { isPoolLocked, validateSelections } from "@/lib/pool";
-import { initialState } from "@/lib/sample-data";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
-import { AppState, AuthMode, AuthResult, Golfer, PendingMagicLink, Pool, PoolEntry, TeamSelection, Tier, Tournament, User } from "@/lib/types";
-import { createId, createJoinCode } from "@/lib/utils";
+import {
+  AppState,
+  AuthResult,
+  Golfer,
+  Pool,
+  PoolEntry,
+  TeamSelection,
+  Tier,
+  Tournament,
+  User,
+} from "@/lib/types";
+import { createJoinCode } from "@/lib/utils";
 
-const STORAGE_KEY = "golf-pool-state-v1";
-const IMPORTED_FEED_STORAGE_KEY = "golf-pool-imported-feed-v1";
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 type CreatePoolInput = {
   name: string;
@@ -21,11 +30,9 @@ type CreatePoolInput = {
 type AppContextValue = {
   state: AppState;
   currentUser: User | null;
-  isUsingSupabase: boolean;
   isReady: boolean;
   register: (userName: string, email: string) => Promise<AuthResult>;
   login: (email: string) => Promise<AuthResult>;
-  consumeMagicLink: (token: string) => Promise<User | null>;
   logout: () => Promise<void>;
   createPool: (input: CreatePoolInput) => Promise<Pool | null>;
   joinPool: (joinCode: string) => Promise<Pool | null>;
@@ -33,14 +40,12 @@ type AppContextValue = {
   inviteEmails: (poolId: string, emails: string[]) => Promise<void>;
   saveEntry: (poolId: string, selections: TeamSelection[], submit: boolean) => Promise<PoolEntry | null>;
   importTournamentFeed: (tournament: Tournament, golfers: Golfer[]) => Promise<void>;
+  refreshGolfers: (tournamentId: string) => Promise<void>;
 };
 
-const AppContext = createContext<AppContextValue | null>(null);
-
-type ImportedFeed = {
-  tournaments: Tournament[];
-  golfers: Golfer[];
-};
+// ---------------------------------------------------------------------------
+// Remote row types (Supabase snake_case → camelCase mapping)
+// ---------------------------------------------------------------------------
 
 type RemoteTournamentRow = {
   id: string;
@@ -53,6 +58,7 @@ type RemoteTournamentRow = {
   source_url: string | null;
   odds_source_url: string | null;
   import_meta: Tournament["importMeta"] | null;
+  scores_updated_at: string | null;
 };
 
 type RemoteGolferRow = {
@@ -79,92 +85,9 @@ type JoinedPoolRow = {
   tiers: Tier[] | null;
 };
 
-type StorageLike = {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
-};
-
-function mergeById<T extends { id: string }>(base: T[], extras: T[]) {
-  const mapped = new Map(base.map((item) => [item.id, item]));
-
-  for (const item of extras) {
-    mapped.set(item.id, item);
-  }
-
-  return Array.from(mapped.values());
-}
-
-function getBrowserStorage(): StorageLike | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const candidate = window.localStorage;
-
-  if (
-    candidate &&
-    typeof candidate.getItem === "function" &&
-    typeof candidate.setItem === "function"
-  ) {
-    return candidate;
-  }
-
-  return null;
-}
-
-async function getSafeSupabaseBrowserClient() {
-  if (typeof window === "undefined" || !isSupabaseConfigured()) {
-    return null;
-  }
-
-  return await getSupabaseBrowserClient();
-}
-
-function readImportedFeed(): ImportedFeed {
-  const storage = getBrowserStorage();
-  if (!storage) {
-    return {
-      tournaments: [],
-      golfers: [],
-    };
-  }
-
-  const stored = storage.getItem(IMPORTED_FEED_STORAGE_KEY);
-  if (!stored) {
-    return {
-      tournaments: [],
-      golfers: [],
-    };
-  }
-
-  try {
-    return JSON.parse(stored) as ImportedFeed;
-  } catch {
-    return {
-      tournaments: [],
-      golfers: [],
-    };
-  }
-}
-
-function persistImportedFeed(feed: ImportedFeed) {
-  const storage = getBrowserStorage();
-  if (!storage) {
-    return;
-  }
-
-  storage.setItem(IMPORTED_FEED_STORAGE_KEY, JSON.stringify(feed));
-}
-
-function mergeImportedFeed(state: AppState) {
-  const importedFeed = readImportedFeed();
-
-  return {
-    ...state,
-    tournaments: mergeById(state.tournaments, importedFeed.tournaments),
-    golfers: mergeById(state.golfers, importedFeed.golfers),
-  };
-}
+// ---------------------------------------------------------------------------
+// Mapping helpers
+// ---------------------------------------------------------------------------
 
 function mapTournamentRow(row: RemoteTournamentRow): Tournament {
   return {
@@ -195,665 +118,355 @@ function mapGolferRow(row: RemoteGolferRow): Golfer {
   };
 }
 
-function readInitialState(): AppState {
-  const storage = getBrowserStorage();
-  if (!storage) {
-    return initialState;
-  }
-
-  const stored = storage.getItem(STORAGE_KEY);
-  if (!stored) {
-    return mergeImportedFeed(initialState);
-  }
-
-  try {
-    return mergeImportedFeed(JSON.parse(stored) as AppState);
-  } catch {
-    return mergeImportedFeed(initialState);
-  }
+function existingSubmittedAt(entries: PoolEntry[], poolId: string, userId: string): string | null {
+  return entries.find((e) => e.poolId === poolId && e.userId === userId)?.submittedAt ?? null;
 }
 
-function createSupabaseShellState(): AppState {
-  return {
-    ...initialState,
-    users: [],
-    currentUserId: null,
-    pools: [],
-    entries: [],
-    pendingMagicLinks: [],
-  };
-}
+const EMPTY_STATE: AppState = {
+  users: [],
+  currentUserId: null,
+  tournaments: [],
+  golfers: [],
+  pools: [],
+  entries: [],
+  scoresLastSyncedAt: null,
+};
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AppState>(initialState);
-  const [hydrated, setHydrated] = useState(false);
-  const usingSupabase = isSupabaseConfigured();
+  const [state, setState] = useState<AppState>(EMPTY_STATE);
+  const [isReady, setIsReady] = useState(false);
 
+  // -------------------------------------------------------------------------
+  // Core data loader — fetches everything the current user can see
+  // -------------------------------------------------------------------------
+  const loadState = useCallback(async () => {
+    setIsReady(false);
+
+    const supabase = await getSupabaseBrowserClient();
+
+    const [
+      { data: authData },
+      profilesResult,
+      tournamentsResult,
+      golfersResult,
+      poolsResult,
+      membershipsResult,
+      entriesResult,
+    ] = await Promise.all([
+      supabase.auth.getUser(),
+      supabase.from("profiles").select("id,email,user_name,created_at"),
+      supabase
+        .from("tournaments")
+        .select("id,name,course,start_date,status,purse,source,source_url,odds_source_url,import_meta,scores_updated_at"),
+      supabase
+        .from("golfers")
+        .select(
+          "id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete",
+        ),
+      supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers"),
+      supabase.from("pool_members").select("pool_id,user_id"),
+      supabase.from("pool_entries").select("id,pool_id,user_id,selections,submitted_at"),
+    ]);
+
+    const users: User[] =
+      profilesResult.data?.map((p) => ({
+        id: p.id,
+        email: p.email,
+        userName: p.user_name,
+        createdAt: p.created_at,
+      })) ?? [];
+
+    const pools: Pool[] =
+      poolsResult.data?.map((pool) => ({
+        id: pool.id,
+        name: pool.name,
+        tournamentId: pool.tournament_id,
+        adminUserId: pool.admin_user_id,
+        joinCode: pool.join_code,
+        invitedEmails: Array.isArray(pool.invited_emails) ? pool.invited_emails : [],
+        memberUserIds:
+          membershipsResult.data
+            ?.filter((m) => m.pool_id === pool.id)
+            .map((m) => m.user_id) ?? [],
+        createdAt: pool.created_at,
+        lockAt: pool.lock_at,
+        tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
+      })) ?? [];
+
+    const entries: PoolEntry[] =
+      entriesResult.data?.map((e) => ({
+        id: e.id,
+        poolId: e.pool_id,
+        userId: e.user_id,
+        selections: Array.isArray(e.selections) ? (e.selections as TeamSelection[]) : [],
+        submittedAt: e.submitted_at,
+      })) ?? [];
+
+    // Derive last sync time from the most-recently-synced tournament
+    const rows = tournamentsResult.data as (RemoteTournamentRow[] | null);
+    const scoresLastSyncedAt =
+      rows
+        ?.map((r) => r.scores_updated_at)
+        .filter(Boolean)
+        .sort()
+        .at(-1) ?? null;
+
+    setState({
+      users,
+      currentUserId: authData.user?.id ?? null,
+      tournaments: (rows ?? []).map(mapTournamentRow),
+      golfers: (golfersResult.data as RemoteGolferRow[] | null)?.map(mapGolferRow) ?? [],
+      pools,
+      entries,
+      scoresLastSyncedAt,
+    });
+
+    setIsReady(true);
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Mount: load data and listen for auth changes
+  // -------------------------------------------------------------------------
   useEffect(() => {
-    if (!usingSupabase) {
-      setState(readInitialState());
-      setHydrated(true);
-      return;
-    }
+    void loadState();
 
-    async function loadRemoteState() {
-      setHydrated(false);
-      setState(createSupabaseShellState());
+    let subscription: { unsubscribe: () => void } | null = null;
 
-      const supabase = await getSafeSupabaseBrowserClient();
-      if (!supabase) {
-        setHydrated(true);
-        return;
-      }
+    void getSupabaseBrowserClient().then((supabase) => {
+      const { data } = supabase.auth.onAuthStateChange(() => {
+        void loadState();
+      });
+      subscription = data.subscription;
+    });
 
-      const [
-        { data: authData },
-        profilesResult,
-        tournamentsResult,
-        golfersResult,
-        poolsResult,
-        membershipsResult,
-        entriesResult,
-      ] = await Promise.all([
-        supabase.auth.getUser(),
-        supabase.from("profiles").select("id,email,user_name,created_at"),
-        supabase
-          .from("tournaments")
-          .select("id,name,course,start_date,status,purse,source,source_url,odds_source_url,import_meta"),
-        supabase
-          .from("golfers")
-          .select("id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete"),
-        supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers"),
-        supabase.from("pool_members").select("pool_id,user_id"),
-        supabase.from("pool_entries").select("id,pool_id,user_id,selections,submitted_at"),
-      ]);
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [loadState]);
 
-      const users: User[] =
-        profilesResult.data?.map((profile) => ({
-          id: profile.id,
-          email: profile.email,
-          userName: profile.user_name,
-          createdAt: profile.created_at,
-        })) ?? [];
+  // -------------------------------------------------------------------------
+  // Actions
+  // -------------------------------------------------------------------------
+  const value = useMemo<AppContextValue>(() => {
+    const currentUser = state.users.find((u) => u.id === state.currentUserId) ?? null;
 
-      const pools: Pool[] =
-        poolsResult.data?.map((pool) => ({
+    return {
+      state,
+      currentUser,
+      isReady,
+
+      // -- Auth ---------------------------------------------------------------
+      async register(userName, email) {
+        const supabase = await getSupabaseBrowserClient();
+        const normalizedEmail = email.trim().toLowerCase();
+        const redirectTo = `${window.location.origin}/auth/confirm?next=/`;
+
+        const { error } = await supabase.auth.signInWithOtp({
+          email: normalizedEmail,
+          options: {
+            emailRedirectTo: redirectTo,
+            shouldCreateUser: true,
+            data: { user_name: userName.trim() },
+          },
+        });
+
+        if (error) {
+          return { ok: false, message: error.message };
+        }
+
+        return {
+          ok: true,
+          message: "Check your email for your sign-up link.",
+          detail: `We sent a secure link to ${normalizedEmail}. Click it on this device to create your account.`,
+        };
+      },
+
+      async login(email) {
+        const supabase = await getSupabaseBrowserClient();
+        const normalizedEmail = email.trim().toLowerCase();
+        const redirectTo = `${window.location.origin}/auth/confirm?next=/`;
+
+        const { error } = await supabase.auth.signInWithOtp({
+          email: normalizedEmail,
+          options: {
+            emailRedirectTo: redirectTo,
+            shouldCreateUser: false,
+          },
+        });
+
+        if (error) {
+          return { ok: false, message: error.message };
+        }
+
+        return {
+          ok: true,
+          message: "Check your email for your sign-in link.",
+          detail: `We sent a secure link to ${normalizedEmail}. Use it on this device to continue.`,
+        };
+      },
+
+      async logout() {
+        const supabase = await getSupabaseBrowserClient();
+        await supabase.auth.signOut();
+        setState(EMPTY_STATE);
+        setIsReady(true);
+      },
+
+      // -- Pools --------------------------------------------------------------
+      async createPool(input) {
+        if (!currentUser) return null;
+
+        const supabase = await getSupabaseBrowserClient();
+        const {
+          data: { user: authUser },
+          error: authError,
+        } = await supabase.auth.getUser();
+
+        if (authError || !authUser) {
+          throw new Error(authError?.message ?? "No active session.");
+        }
+
+        // Ensure profile exists
+        await supabase.from("profiles").upsert(
+          {
+            id: authUser.id,
+            email: authUser.email ?? currentUser.email,
+            user_name:
+              typeof authUser.user_metadata?.user_name === "string" && authUser.user_metadata.user_name.trim()
+                ? authUser.user_metadata.user_name.trim()
+                : currentUser.userName,
+          },
+          { onConflict: "id" },
+        );
+
+        const { data: pool, error } = await supabase
+          .from("pools")
+          .insert({
+            name: input.name.trim(),
+            tournament_id: input.tournamentId,
+            admin_user_id: authUser.id,
+            join_code: createJoinCode(),
+            invited_emails: [],
+            lock_at: input.lockAt,
+            tiers: input.tiers,
+          })
+          .select("id,join_code,created_at")
+          .single();
+
+        if (error || !pool) throw new Error(error?.message ?? "Pool insert failed.");
+
+        await supabase.from("pool_members").insert({ pool_id: pool.id, user_id: authUser.id });
+
+        await loadState();
+
+        return {
+          id: pool.id,
+          name: input.name.trim(),
+          tournamentId: input.tournamentId,
+          adminUserId: authUser.id,
+          joinCode: pool.join_code,
+          invitedEmails: [],
+          memberUserIds: [authUser.id],
+          createdAt: pool.created_at,
+          lockAt: input.lockAt,
+          tiers: input.tiers,
+        };
+      },
+
+      async joinPool(joinCode) {
+        if (!currentUser) return null;
+
+        const supabase = await getSupabaseBrowserClient();
+        const { data: pool, error } = await supabase
+          .rpc("join_pool_by_code", { input_code: joinCode.trim().toUpperCase() })
+          .returns<JoinedPoolRow[]>()
+          .single();
+
+        if (error || !pool) return null;
+
+        await loadState();
+
+        return {
           id: pool.id,
           name: pool.name,
           tournamentId: pool.tournament_id,
           adminUserId: pool.admin_user_id,
           joinCode: pool.join_code,
           invitedEmails: Array.isArray(pool.invited_emails) ? pool.invited_emails : [],
-          memberUserIds:
-            membershipsResult.data?.filter((membership) => membership.pool_id === pool.id).map((membership) => membership.user_id) ?? [],
+          memberUserIds: [],
           createdAt: pool.created_at,
           lockAt: pool.lock_at,
           tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
-        })) ?? [];
-
-      const entries: PoolEntry[] =
-        entriesResult.data?.map((entry) => ({
-          id: entry.id,
-          poolId: entry.pool_id,
-          userId: entry.user_id,
-          selections: Array.isArray(entry.selections) ? (entry.selections as TeamSelection[]) : [],
-          submittedAt: entry.submitted_at,
-        })) ?? [];
-
-      setState({
-        users,
-        currentUserId: authData.user?.id ?? null,
-        pendingMagicLinks: [],
-        tournaments: mergeById(
-          initialState.tournaments,
-          (tournamentsResult.data as RemoteTournamentRow[] | null)?.map(mapTournamentRow) ?? [],
-        ),
-        golfers: mergeById(
-          initialState.golfers,
-          (golfersResult.data as RemoteGolferRow[] | null)?.map(mapGolferRow) ?? [],
-        ),
-        pools,
-        entries,
-      });
-      setHydrated(true);
-    }
-
-    void loadRemoteState();
-
-    let subscription: { unsubscribe: () => void } | null = null;
-
-    void getSafeSupabaseBrowserClient().then((supabase) => {
-      if (!supabase) {
-        return;
-      }
-
-      const authSubscription = supabase.auth.onAuthStateChange(() => {
-        void loadRemoteState();
-      });
-
-      subscription = authSubscription.data.subscription;
-    });
-
-    return () => {
-      subscription?.unsubscribe();
-    };
-  }, [usingSupabase]);
-
-  useEffect(() => {
-    if (!hydrated || usingSupabase) {
-      return;
-    }
-
-    const storage = getBrowserStorage();
-    if (!storage) {
-      return;
-    }
-
-    storage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [hydrated, state]);
-
-  const value = useMemo<AppContextValue>(() => {
-    const currentUser = state.users.find((user) => user.id === state.currentUserId) ?? null;
-
-    async function refreshRemoteState() {
-      const supabase = await getSafeSupabaseBrowserClient();
-      if (!supabase) {
-        return;
-      }
-
-      const [
-        { data: authData },
-        profilesResult,
-        tournamentsResult,
-        golfersResult,
-        poolsResult,
-        membershipsResult,
-        entriesResult,
-      ] = await Promise.all([
-        supabase.auth.getUser(),
-        supabase.from("profiles").select("id,email,user_name,created_at"),
-        supabase
-          .from("tournaments")
-          .select("id,name,course,start_date,status,purse,source,source_url,odds_source_url,import_meta"),
-        supabase
-          .from("golfers")
-          .select("id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete"),
-        supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers"),
-        supabase.from("pool_members").select("pool_id,user_id"),
-        supabase.from("pool_entries").select("id,pool_id,user_id,selections,submitted_at"),
-      ]);
-
-      setState({
-        users:
-          profilesResult.data?.map((profile) => ({
-            id: profile.id,
-            email: profile.email,
-            userName: profile.user_name,
-            createdAt: profile.created_at,
-          })) ?? [],
-        currentUserId: authData.user?.id ?? null,
-        pendingMagicLinks: [],
-        tournaments: mergeById(
-          initialState.tournaments,
-          (tournamentsResult.data as RemoteTournamentRow[] | null)?.map(mapTournamentRow) ?? [],
-        ),
-        golfers: mergeById(
-          initialState.golfers,
-          (golfersResult.data as RemoteGolferRow[] | null)?.map(mapGolferRow) ?? [],
-        ),
-        pools:
-          poolsResult.data?.map((pool) => ({
-            id: pool.id,
-            name: pool.name,
-            tournamentId: pool.tournament_id,
-            adminUserId: pool.admin_user_id,
-            joinCode: pool.join_code,
-            invitedEmails: Array.isArray(pool.invited_emails) ? pool.invited_emails : [],
-            memberUserIds:
-              membershipsResult.data?.filter((membership) => membership.pool_id === pool.id).map((membership) => membership.user_id) ?? [],
-            createdAt: pool.created_at,
-            lockAt: pool.lock_at,
-            tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
-          })) ?? [],
-        entries:
-          entriesResult.data?.map((entry) => ({
-            id: entry.id,
-            poolId: entry.pool_id,
-            userId: entry.user_id,
-            selections: Array.isArray(entry.selections) ? (entry.selections as TeamSelection[]) : [],
-            submittedAt: entry.submitted_at,
-          })) ?? [],
-      });
-    }
-
-    const createMagicLink = (user: User, mode: AuthMode) => {
-      const link: PendingMagicLink = {
-        token: createId("token"),
-        email: user.email,
-        userId: user.id,
-        mode,
-        createdAt: new Date().toISOString(),
-      };
-
-      setState((current) => ({
-        ...current,
-        pendingMagicLinks: [link, ...current.pendingMagicLinks],
-      }));
-
-      return link;
-    };
-
-    return {
-      state,
-      currentUser,
-      isUsingSupabase: usingSupabase,
-      isReady: hydrated,
-      async register(userName, email) {
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          const normalizedEmail = email.trim().toLowerCase();
-          const redirectTo = `${window.location.origin}/auth/confirm?next=/`;
-          const { error } = await supabase.auth.signInWithOtp({
-            email: normalizedEmail,
-            options: {
-              emailRedirectTo: redirectTo,
-              shouldCreateUser: true,
-              data: {
-                user_name: userName.trim(),
-              },
-            },
-          });
-
-          if (error) {
-            return {
-              ok: false,
-              message: error.message,
-            };
-          }
-
-          return {
-            ok: true,
-            message: "Check your email for your sign-up link.",
-            detail: `We sent a secure sign-in link to ${normalizedEmail}. It will create your account and bring you back into the pool.`,
-          };
-        }
-
-        const normalizedEmail = email.trim().toLowerCase();
-        const existingUser = state.users.find((user) => user.email === normalizedEmail);
-        const user =
-          existingUser ??
-          {
-            id: createId("user"),
-            email: normalizedEmail,
-            userName: userName.trim(),
-            createdAt: new Date().toISOString(),
-          };
-
-        setState((current) => ({
-          ...current,
-          users: existingUser ? current.users : [user, ...current.users],
-        }));
-
-        const link = createMagicLink(user, "register");
-        return {
-          ok: true,
-          message: `Complete registration for ${link.email}`,
-          detail: "Magic-link preview mode is enabled for this environment.",
-          previewHref: `/auth/callback?token=${link.token}`,
         };
       },
-      async login(email) {
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          const normalizedEmail = email.trim().toLowerCase();
-          const redirectTo = `${window.location.origin}/auth/confirm?next=/`;
-          const { error } = await supabase.auth.signInWithOtp({
-            email: normalizedEmail,
-            options: {
-              emailRedirectTo: redirectTo,
-              shouldCreateUser: false,
-            },
-          });
 
-          if (error) {
-            return {
-              ok: false,
-              message: error.message,
-            };
-          }
-
-          return {
-            ok: true,
-            message: "Check your email for your login link.",
-            detail: `We sent a secure sign-in link to ${normalizedEmail}. Use it on this device to continue.`,
-          };
-        }
-
-        const normalizedEmail = email.trim().toLowerCase();
-        const user = state.users.find((candidate) => candidate.email === normalizedEmail);
-
-        if (!user) {
-          return {
-            ok: false,
-            message: `No account exists for ${normalizedEmail}.`,
-          };
-        }
-
-        const link = createMagicLink(user, "login");
-        return {
-          ok: true,
-          message: `Sign in as ${link.email}`,
-          detail: "Magic-link preview mode is enabled for this environment.",
-          previewHref: `/auth/callback?token=${link.token}`,
-        };
-      },
-      async consumeMagicLink(token) {
-        if (await getSafeSupabaseBrowserClient()) {
-          return null;
-        }
-
-        const link = state.pendingMagicLinks.find((candidate) => candidate.token === token);
-        if (!link) {
-          return null;
-        }
-
-        const user = state.users.find((candidate) => candidate.id === link.userId) ?? null;
-        setState((current) => ({
-          ...current,
-          currentUserId: link.userId,
-          pendingMagicLinks: current.pendingMagicLinks.filter((candidate) => candidate.token !== token),
-        }));
-        return user;
-      },
-      async logout() {
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          await supabase.auth.signOut();
-          await refreshRemoteState();
-          return;
-        }
-
-        setState((current) => ({
-          ...current,
-          currentUserId: null,
-        }));
-      },
-      async createPool(input) {
-        if (!currentUser) {
-          return null;
-        }
-
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          const {
-            data: { user: authUser },
-            error: authError,
-          } = await supabase.auth.getUser();
-
-          if (authError || !authUser) {
-            throw new Error(authError?.message ?? "No active Supabase session found.");
-          }
-
-          const adminUserId = authUser.id;
-          const adminEmail = authUser.email ?? currentUser.email;
-          const adminUserName =
-            typeof authUser.user_metadata?.user_name === "string" && authUser.user_metadata.user_name.trim()
-              ? authUser.user_metadata.user_name.trim()
-              : currentUser.userName;
-
-          const { error: profileError } = await supabase.from("profiles").upsert(
-            {
-              id: adminUserId,
-              email: adminEmail,
-              user_name: adminUserName,
-            },
-            { onConflict: "id" },
-          );
-
-          if (profileError) {
-            throw new Error(profileError.message);
-          }
-
-          const nextPool = {
-            name: input.name.trim(),
-            tournament_id: input.tournamentId,
-            admin_user_id: adminUserId,
-            join_code: createJoinCode(),
-            invited_emails: [],
-            lock_at: input.lockAt,
-            tiers: input.tiers,
-          };
-
-          const { data: insertedPool, error } = await supabase
-            .from("pools")
-            .insert(nextPool)
-            .select("id,join_code,created_at")
-            .single();
-
-          if (error || !insertedPool) {
-            throw new Error(error?.message ?? "Pool insert failed.");
-          }
-
-          const { error: membershipError } = await supabase.from("pool_members").insert({
-            pool_id: insertedPool.id,
-            user_id: adminUserId,
-          });
-
-          if (membershipError) {
-            throw new Error(membershipError.message);
-          }
-
-          await refreshRemoteState();
-
-          return {
-            id: insertedPool.id,
-            name: nextPool.name,
-            tournamentId: nextPool.tournament_id,
-            adminUserId,
-            joinCode: insertedPool.join_code,
-            invitedEmails: [],
-            memberUserIds: [adminUserId],
-            createdAt: insertedPool.created_at,
-            lockAt: nextPool.lock_at,
-            tiers: nextPool.tiers,
-          };
-        }
-
-        const pool: Pool = {
-          id: createId("pool"),
-          name: input.name.trim(),
-          tournamentId: input.tournamentId,
-          adminUserId: currentUser.id,
-          joinCode: createJoinCode(),
-          invitedEmails: [],
-          memberUserIds: [currentUser.id],
-          createdAt: new Date().toISOString(),
-          lockAt: input.lockAt,
-          tiers: input.tiers,
-        };
-
-        setState((current) => ({
-          ...current,
-          pools: [pool, ...current.pools],
-        }));
-
-        return pool;
-      },
-      async joinPool(joinCode) {
-        if (!currentUser) {
-          return null;
-        }
-
-        const normalizedCode = joinCode.trim().toUpperCase();
-
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          const { data: pool, error } = await supabase
-            .rpc("join_pool_by_code", { input_code: normalizedCode })
-            .returns<JoinedPoolRow[]>()
-            .single();
-
-          if (error || !pool) {
-            return null;
-          }
-
-          await refreshRemoteState();
-
-          return {
-            id: pool.id,
-            name: pool.name,
-            tournamentId: pool.tournament_id,
-            adminUserId: pool.admin_user_id,
-            joinCode: pool.join_code,
-            invitedEmails: Array.isArray(pool.invited_emails) ? pool.invited_emails : [],
-            memberUserIds: [],
-            createdAt: pool.created_at,
-            lockAt: pool.lock_at,
-            tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
-          };
-        }
-
-        const pool = state.pools.find((candidate) => candidate.joinCode === normalizedCode);
-
-        if (!pool) {
-          return null;
-        }
-
-        setState((current) => ({
-          ...current,
-          pools: current.pools.map((candidate) =>
-            candidate.id === pool.id
-              ? {
-                  ...candidate,
-                  memberUserIds: candidate.memberUserIds.includes(currentUser.id)
-                    ? candidate.memberUserIds
-                    : [...candidate.memberUserIds, currentUser.id],
-                }
-              : candidate,
-          ),
-        }));
-
-        return pool;
-      },
       async updatePoolTiers(poolId, tiers) {
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          await supabase.from("pools").update({ tiers }).eq("id", poolId);
-          await refreshRemoteState();
-          return;
-        }
-
-        setState((current) => ({
-          ...current,
-          pools: current.pools.map((pool) => (pool.id === poolId ? { ...pool, tiers } : pool)),
-        }));
+        const supabase = await getSupabaseBrowserClient();
+        await supabase.from("pools").update({ tiers }).eq("id", poolId);
+        await loadState();
       },
+
       async inviteEmails(poolId, emails) {
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          const pool = state.pools.find((candidate) => candidate.id === poolId);
-          if (!pool) {
-            return;
-          }
+        const pool = state.pools.find((p) => p.id === poolId);
+        if (!pool) return;
 
-          const invitedEmails = Array.from(new Set([...pool.invitedEmails, ...emails.map((email) => email.toLowerCase())]));
-          await supabase.from("pools").update({ invited_emails: invitedEmails }).eq("id", poolId);
-          await refreshRemoteState();
-          return;
-        }
-
-        setState((current) => ({
-          ...current,
-          pools: current.pools.map((pool) =>
-            pool.id === poolId
-              ? {
-                  ...pool,
-                  invitedEmails: Array.from(new Set([...pool.invitedEmails, ...emails.map((email) => email.toLowerCase())])),
-                }
-              : pool,
-          ),
-        }));
+        const supabase = await getSupabaseBrowserClient();
+        const merged = Array.from(new Set([...pool.invitedEmails, ...emails.map((e) => e.toLowerCase())]));
+        await supabase.from("pools").update({ invited_emails: merged }).eq("id", poolId);
+        await loadState();
       },
+
+      // -- Entries ------------------------------------------------------------
       async saveEntry(poolId, selections, submit) {
-        if (!currentUser) {
-          return null;
-        }
+        if (!currentUser) return null;
 
-        const pool = state.pools.find((candidate) => candidate.id === poolId);
-        if (!pool) {
-          return null;
-        }
+        const pool = state.pools.find((p) => p.id === poolId);
+        if (!pool || !pool.memberUserIds.includes(currentUser.id)) return null;
+        if (isPoolLocked(pool)) return null;
+        if (submit && !validateSelections(pool, selections).isValid) return null;
 
-        if (!pool.memberUserIds.includes(currentUser.id)) {
-          return null;
-        }
-
-        if (isPoolLocked(pool)) {
-          return null;
-        }
-
-        if (submit && !validateSelections(pool, selections).isValid) {
-          return null;
-        }
-
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          const payload = {
-            pool_id: poolId,
-            user_id: currentUser.id,
-            selections,
-            submitted_at: submit ? new Date().toISOString() : existingSubmittedAt(state.entries, poolId, currentUser.id),
-          };
-
-          const { data, error } = await supabase
-            .from("pool_entries")
-            .upsert(payload, { onConflict: "pool_id,user_id" })
-            .select("id,pool_id,user_id,selections,submitted_at")
-            .single();
-
-          if (error || !data) {
-            return null;
-          }
-
-          await refreshRemoteState();
-
-          return {
-            id: data.id,
-            poolId: data.pool_id,
-            userId: data.user_id,
-            selections: Array.isArray(data.selections) ? (data.selections as TeamSelection[]) : [],
-            submittedAt: data.submitted_at,
-          };
-        }
-
-        const existing = state.entries.find((entry) => entry.poolId === poolId && entry.userId === currentUser.id);
-        const nextEntry: PoolEntry = existing
-          ? {
-              ...existing,
+        const supabase = await getSupabaseBrowserClient();
+        const { data, error } = await supabase
+          .from("pool_entries")
+          .upsert(
+            {
+              pool_id: poolId,
+              user_id: currentUser.id,
               selections,
-              submittedAt: submit ? new Date().toISOString() : existing.submittedAt,
-            }
-          : {
-              id: createId("entry"),
-              poolId,
-              userId: currentUser.id,
-              selections,
-              submittedAt: submit ? new Date().toISOString() : null,
-            };
+              submitted_at: submit
+                ? new Date().toISOString()
+                : existingSubmittedAt(state.entries, poolId, currentUser.id),
+            },
+            { onConflict: "pool_id,user_id" },
+          )
+          .select("id,pool_id,user_id,selections,submitted_at")
+          .single();
 
-        setState((current) => ({
-          ...current,
-          entries: existing
-            ? current.entries.map((entry) => (entry.id === existing.id ? nextEntry : entry))
-            : [nextEntry, ...current.entries],
-        }));
+        if (error || !data) return null;
 
-        return nextEntry;
+        await loadState();
+
+        return {
+          id: data.id,
+          poolId: data.pool_id,
+          userId: data.user_id,
+          selections: Array.isArray(data.selections) ? (data.selections as TeamSelection[]) : [],
+          submittedAt: data.submitted_at,
+        };
       },
+
+      // -- Tournament data ----------------------------------------------------
       async importTournamentFeed(tournament, golfers) {
-        const supabase = await getSafeSupabaseBrowserClient();
-        if (supabase) {
-          const tournamentPayload = {
+        const supabase = await getSupabaseBrowserClient();
+
+        await supabase.from("tournaments").upsert(
+          {
             id: tournament.id,
             name: tournament.name,
             course: tournament.course,
@@ -864,72 +477,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             source_url: tournament.sourceUrl ?? null,
             odds_source_url: tournament.oddsSourceUrl ?? null,
             import_meta: tournament.importMeta ?? null,
-          };
+          },
+          { onConflict: "id" },
+        );
 
-          const golferPayload = golfers.map((golfer) => ({
-            id: golfer.id,
-            tournament_id: golfer.tournamentId,
-            name: golfer.name,
-            odds_american: golfer.oddsAmerican,
-            implied_probability: golfer.impliedProbability,
-            current_score_to_par: golfer.currentScoreToPar,
-            position: golfer.position,
-            made_cut: golfer.madeCut,
-            rounds_complete: golfer.roundsComplete,
-          }));
+        await supabase.from("golfers").delete().eq("tournament_id", tournament.id);
 
-          const { error: tournamentError } = await supabase
-            .from("tournaments")
-            .upsert(tournamentPayload, { onConflict: "id" });
-
-          if (tournamentError) {
-            throw tournamentError;
-          }
-
-          await supabase.from("golfers").delete().eq("tournament_id", tournament.id);
-
-          if (golferPayload.length > 0) {
-            const { error: golferError } = await supabase
-              .from("golfers")
-              .upsert(golferPayload, { onConflict: "id" });
-
-            if (golferError) {
-              throw golferError;
-            }
-          }
-
-          await refreshRemoteState();
-          return;
+        if (golfers.length > 0) {
+          await supabase.from("golfers").upsert(
+            golfers.map((g) => ({
+              id: g.id,
+              tournament_id: g.tournamentId,
+              name: g.name,
+              odds_american: g.oddsAmerican,
+              implied_probability: g.impliedProbability,
+              current_score_to_par: g.currentScoreToPar,
+              position: g.position,
+              made_cut: g.madeCut,
+              rounds_complete: g.roundsComplete,
+            })),
+            { onConflict: "id" },
+          );
         }
 
-        const importedFeed = readImportedFeed();
-        const nextFeed = {
-          tournaments: mergeById(importedFeed.tournaments, [tournament]),
-          golfers: mergeById(
-            importedFeed.golfers.filter((golfer) => golfer.tournamentId !== tournament.id),
-            golfers,
-          ),
-        };
+        await loadState();
+      },
 
-        persistImportedFeed(nextFeed);
+      // -- Live scores --------------------------------------------------------
+      async refreshGolfers(tournamentId) {
+        const supabase = await getSupabaseBrowserClient();
+        const { data } = await supabase
+          .from("golfers")
+          .select(
+            "id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete",
+          )
+          .eq("tournament_id", tournamentId);
 
-        setState((current) => ({
-          ...current,
-          tournaments: mergeById(current.tournaments, [tournament]),
-          golfers: mergeById(
-            current.golfers.filter((golfer) => golfer.tournamentId !== tournament.id),
-            golfers,
-          ),
+        if (!data) return;
+
+        const updatedGolfers = data as RemoteGolferRow[];
+
+        setState((prev) => ({
+          ...prev,
+          golfers: [
+            ...prev.golfers.filter((g) => g.tournamentId !== tournamentId),
+            ...updatedGolfers.map(mapGolferRow),
+          ],
+          scoresLastSyncedAt: new Date().toISOString(),
         }));
       },
     };
-  }, [state, usingSupabase]);
+  }, [state, isReady, loadState]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
-}
-
-function existingSubmittedAt(entries: PoolEntry[], poolId: string, userId: string) {
-  return entries.find((entry) => entry.poolId === poolId && entry.userId === userId)?.submittedAt ?? null;
 }
 
 export function useAppState() {

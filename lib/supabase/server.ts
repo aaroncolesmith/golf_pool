@@ -1,4 +1,3 @@
-import "@/lib/local-storage-shim";
 import { cookies } from "next/headers";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/config";
 

@@ -1,6 +1,5 @@
 "use client";
 
-import "@/lib/local-storage-shim";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/config";
 

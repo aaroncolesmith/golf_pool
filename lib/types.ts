@@ -1,5 +1,3 @@
-export type AuthMode = "register" | "login";
-
 export type Golfer = {
   id: string;
   name: string;
@@ -47,15 +45,6 @@ export type AuthResult = {
   ok: boolean;
   message: string;
   detail?: string;
-  previewHref?: string | null;
-};
-
-export type PendingMagicLink = {
-  token: string;
-  email: string;
-  userId: string;
-  mode: AuthMode;
-  createdAt: string;
 };
 
 export type TeamSelection = {
@@ -87,11 +76,11 @@ export type Pool = {
 export type AppState = {
   users: User[];
   currentUserId: string | null;
-  pendingMagicLinks: PendingMagicLink[];
   tournaments: Tournament[];
   golfers: Golfer[];
   pools: Pool[];
   entries: PoolEntry[];
+  scoresLastSyncedAt: string | null;
 };
 
 export type LeaderboardRow = {

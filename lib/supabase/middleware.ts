@@ -1,4 +1,3 @@
-import "@/lib/local-storage-shim";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/config";
 

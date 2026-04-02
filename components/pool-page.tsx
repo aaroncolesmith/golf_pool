@@ -2,36 +2,649 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { DraftBoard } from "@/components/draft-board";
 import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
 import { buildLeaderboard } from "@/lib/scoring";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAppState } from "@/lib/store";
-import { TeamSelection } from "@/lib/types";
+import { Golfer, Pool, TeamSelection } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
-export function PoolPage({ poolId }: { poolId: string }) {
-  const { state, currentUser, updatePoolTiers, saveEntry, inviteEmails, isReady } = useAppState();
-  const pool = state.pools.find((candidate) => candidate.id === poolId);
-  const tournament = state.tournaments.find((candidate) => candidate.id === pool?.tournamentId);
-  const golfers = state.golfers.filter((candidate) => candidate.tournamentId === tournament?.id);
-  const golferLookup = useMemo(() => new Map(golfers.map((golfer) => [golfer.id, golfer])), [golfers]);
-  const existingEntry = currentUser
-    ? state.entries.find((entry) => entry.poolId === poolId && entry.userId === currentUser.id)
-    : null;
-  const leaderboard = pool ? buildLeaderboard(state, pool) : [];
-  const [selections, setSelections] = useState<TeamSelection[]>(existingEntry?.selections ?? []);
-  const [inviteInput, setInviteInput] = useState("");
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function scoreLabel(score: number): string {
+  if (score === 0) return "E";
+  return score > 0 ? `+${score}` : `${score}`;
+}
+
+function scoreBadgeClass(score: number): string {
+  if (score === 0) return "score-badge even";
+  return score < 0 ? "score-badge under" : "score-badge over";
+}
+
+function formatLastSynced(isoString: string | null): string {
+  if (!isoString) return "Not yet synced";
+  const d = new Date(isoString);
+  return `Updated ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+type TabId = "picks" | "leaderboard" | "members" | "admin";
+
+// ---------------------------------------------------------------------------
+// Tab: My Picks
+// ---------------------------------------------------------------------------
+
+function PicksTab({
+  pool,
+  golferMap,
+  isLocked,
+  isMember,
+  existingEntry,
+  currentUser,
+}: {
+  pool: Pool;
+  golferMap: Map<string, Golfer>;
+  isLocked: boolean;
+  isMember: boolean;
+  existingEntry: { selections: TeamSelection[]; submittedAt: string | null } | null | undefined;
+  currentUser: { id: string; userName: string } | null;
+}) {
+  const { saveEntry } = useAppState();
+  const [selections, setSelections] = useState<TeamSelection[]>(
+    existingEntry?.selections ?? [],
+  );
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setSelections(existingEntry?.selections ?? []);
   }, [existingEntry]);
 
+  const validation = validateSelections(pool, selections);
+
+  function updateSelection(tierId: string, golferId: string) {
+    setDraftMessage(null);
+    setSelections((prev) => {
+      const withoutTier = prev.filter((s) => s.tierId !== tierId);
+      return [...withoutTier, { tierId, golferId }];
+    });
+  }
+
+  async function handleSave(submit: boolean) {
+    if (submit && !validation.isValid) {
+      setDraftMessage(validation.errors[0] ?? "Your picks aren't complete yet.");
+      return;
+    }
+    const entry = await saveEntry(pool.id, selections, submit);
+    setDraftMessage(
+      entry
+        ? submit
+          ? "Team submitted! ✓"
+          : "Draft saved."
+        : "Unable to save — the pool may be locked.",
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="notice notice-error">
+        <p>Sign in to make your picks.</p>
+      </div>
+    );
+  }
+
+  if (!isMember) {
+    return (
+      <div className="empty-state">
+        <span className="empty-state-icon">🔒</span>
+        <p style={{ fontWeight: 700 }}>You&apos;re not in this pool</p>
+        <p className="muted small">
+          Join using a valid invite link or the join code on your dashboard.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <DraftBoard
+      pool={pool}
+      golferMap={golferMap}
+      selections={selections}
+      onSelectionChange={updateSelection}
+      onSave={handleSave}
+      draftMessage={draftMessage}
+      existingSubmittedAt={existingEntry?.submittedAt ?? null}
+      isLocked={isLocked}
+      isValid={validation.isValid}
+      validationError={validation.errors[0] ?? null}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab: Leaderboard
+// ---------------------------------------------------------------------------
+
+function LeaderboardTab({
+  leaderboard,
+  isLocked,
+  isMember,
+  currentUserId,
+  tournamentId,
+  scoresLastSyncedAt,
+  onScoresSynced,
+}: {
+  leaderboard: ReturnType<typeof buildLeaderboard>;
+  isLocked: boolean;
+  isMember: boolean;
+  currentUserId: string | null;
+  tournamentId: string;
+  scoresLastSyncedAt: string | null;
+  onScoresSynced: (ts: string) => void;
+}) {
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const { refreshGolfers } = useAppState();
+
+  function toggleRowExpanded(entryId: string) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      next.has(entryId) ? next.delete(entryId) : next.add(entryId);
+      return next;
+    });
+  }
+
+  async function handleSyncScores() {
+    setIsSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch("/api/scores/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tournamentId }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        eventName?: string;
+        updated?: number;
+        unmatched?: string[];
+        error?: string;
+      };
+      if (data.ok) {
+        setSyncMessage(`Synced ${data.updated ?? 0} scores from "${data.eventName}".`);
+        await refreshGolfers(tournamentId);
+        onScoresSynced(new Date().toISOString());
+      } else {
+        setSyncMessage(`Sync failed: ${data.error ?? "Unknown error"}`);
+      }
+    } catch {
+      setSyncMessage("Sync failed — check your connection.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      {/* Sync controls */}
+      {isMember && isLocked && (
+        <div className="sync-controls" style={{ marginBottom: 12 }}>
+          <button
+            className="secondary-button small-button"
+            onClick={handleSyncScores}
+            disabled={isSyncing}
+            type="button"
+          >
+            {isSyncing ? "Syncing…" : "↻ Sync Scores"}
+          </button>
+          {scoresLastSyncedAt && (
+            <span className="sync-timestamp">{formatLastSynced(scoresLastSyncedAt)}</span>
+          )}
+        </div>
+      )}
+
+      {syncMessage && (
+        <p className="muted small" style={{ marginBottom: 12 }}>{syncMessage}</p>
+      )}
+
+      {leaderboard.length === 0 ? (
+        <div className="empty-state">
+          <span className="empty-state-icon">📊</span>
+          <p style={{ fontWeight: 700 }}>No teams yet</p>
+          <p className="muted small">The leaderboard populates once members submit their picks.</p>
+        </div>
+      ) : (
+        <div className="leaderboard">
+          {leaderboard.map((row, index) => {
+            const isExpanded = expandedRows.has(row.entryId);
+            const isEliminated = row.status === "eliminated";
+            const isCurrentUser = currentUserId === row.userId;
+            const canSeePicks = isLocked || isCurrentUser;
+
+            return (
+              <div className="leaderboard-row" key={row.entryId}>
+                <button
+                  className="leaderboard-row-main"
+                  onClick={() => toggleRowExpanded(row.entryId)}
+                  type="button"
+                  aria-expanded={isExpanded}
+                >
+                  <div className="leaderboard-rank-block">
+                    <span className="leaderboard-rank">
+                      {isEliminated ? "—" : `#${index + 1}`}
+                    </span>
+                    <span className="leaderboard-name">
+                      {row.teamName}
+                      {isCurrentUser && <span className="you-badge"> (you)</span>}
+                    </span>
+                  </div>
+                  <div className="leaderboard-score-block">
+                    {isEliminated ? (
+                      <span className="status-pill eliminated">Out</span>
+                    ) : (
+                      <span className={scoreBadgeClass(row.teamScore ?? 0)}>
+                        {row.teamScore === null ? "E" : scoreLabel(row.teamScore)}
+                      </span>
+                    )}
+                    <span className="expand-icon">{isExpanded ? "▲" : "▼"}</span>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div className="leaderboard-detail">
+                    {canSeePicks ? (
+                      <div className="golfer-list">
+                        {row.countingGolfers.map((g) => (
+                          <div className="golfer-row counting" key={g.id}>
+                            <span style={{ fontWeight: 600 }}>{g.name}</span>
+                            <span className={g.currentScoreToPar < 0 ? "negative-score" : ""}>
+                              {scoreLabel(g.currentScoreToPar)}
+                            </span>
+                            <span className="muted small">{g.position}</span>
+                          </div>
+                        ))}
+                        {row.benchGolfers.map((g) => (
+                          <div className="golfer-row bench" key={g.id}>
+                            <span className="muted">{g.name}</span>
+                            <span className="muted">
+                              {g.madeCut ? scoreLabel(g.currentScoreToPar) : "CUT"}
+                            </span>
+                            <span className="muted small">bench</span>
+                          </div>
+                        ))}
+                        {isEliminated && (
+                          <p className="muted small" style={{ marginTop: 6 }}>
+                            Fewer than 4 golfers made the cut — this team is out.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="muted small">
+                        Picks are revealed when the tournament starts.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab: Members
+// ---------------------------------------------------------------------------
+
+function MembersTab({
+  memberUsers,
+  poolId,
+  currentPool,
+  entries,
+  isAdmin,
+  isLocked,
+}: {
+  memberUsers: { id: string; userName: string; email: string }[];
+  poolId: string;
+  currentPool: Pool;
+  entries: { poolId: string; userId: string; submittedAt: string | null }[];
+  isAdmin: boolean;
+  isLocked: boolean;
+}) {
+  const { inviteEmails } = useAppState();
+  const [inviteInput, setInviteInput] = useState("");
+  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
+
+  async function handleInvite() {
+    const emails = inviteInput
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length === 0) return;
+    await inviteEmails(poolId, emails);
+    setInviteInput("");
+    setInviteMessage(`Invited ${emails.length} ${emails.length === 1 ? "person" : "people"}.`);
+    setTimeout(() => setInviteMessage(null), 4000);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="member-list">
+        {memberUsers.map((member) => {
+          const entry = entries.find(
+            (e) => e.poolId === poolId && e.userId === member.id,
+          );
+          return (
+            <div className="member-row" key={member.id}>
+              <div className="member-info">
+                <span className="member-name">{member.userName}</span>
+                <span className="member-email">{member.email}</span>
+              </div>
+              <span className="status-pill pending">
+                {entry?.submittedAt ? "Submitted" : entry ? "Draft" : "Pending"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {isAdmin && !isLocked && (
+        <div className="stack" style={{ marginTop: 8 }}>
+          <p
+            style={{
+              fontSize: "0.78rem",
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--muted)",
+            }}
+          >
+            Invite by email
+          </p>
+          <label className="field">
+            <textarea
+              rows={2}
+              placeholder="email@example.com, another@example.com"
+              value={inviteInput}
+              onChange={(e) => setInviteInput(e.target.value)}
+            />
+          </label>
+          <button className="primary-button" onClick={handleInvite} type="button" style={{ alignSelf: "flex-start" }}>
+            Send invites
+          </button>
+          {inviteMessage && <p className="muted small">{inviteMessage}</p>}
+          {currentPool.invitedEmails.length > 0 && (
+            <p className="muted small">
+              Already invited: {currentPool.invitedEmails.join(", ")}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab: Admin controls
+// ---------------------------------------------------------------------------
+
+function AdminTab({
+  currentPool,
+  golferMap,
+  isLocked,
+  tournamentId,
+  scoresLastSyncedAt,
+  onScoresSynced,
+}: {
+  currentPool: Pool;
+  golferMap: Map<string, Golfer>;
+  isLocked: boolean;
+  tournamentId: string;
+  scoresLastSyncedAt: string | null;
+  onScoresSynced: (ts: string) => void;
+}) {
+  const { updatePoolTiers, refreshGolfers } = useAppState();
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  function handleTierMove(golferId: string, nextTierId: string) {
+    const nextTiers = currentPool.tiers.map((tier) => ({
+      ...tier,
+      golferIds: tier.golferIds.filter((id) => id !== golferId),
+    }));
+    const target = nextTiers.find((t) => t.id === nextTierId);
+    if (target) target.golferIds = [...target.golferIds, golferId];
+    void updatePoolTiers(currentPool.id, nextTiers);
+  }
+
+  async function handleSyncScores() {
+    setIsSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch("/api/scores/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tournamentId }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        eventName?: string;
+        updated?: number;
+        unmatched?: string[];
+        error?: string;
+      };
+      if (data.ok) {
+        setSyncMessage(
+          `Synced ${data.updated ?? 0} golfer scores from "${data.eventName}".${
+            data.unmatched?.length ? ` (${data.unmatched.length} unmatched)` : ""
+          }`,
+        );
+        await refreshGolfers(tournamentId);
+        onScoresSynced(new Date().toISOString());
+      } else {
+        setSyncMessage(`Sync failed: ${data.error ?? "Unknown error"}`);
+      }
+    } catch {
+      setSyncMessage("Sync failed — check your connection and try again.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Score sync */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <p
+          style={{
+            fontSize: "0.75rem",
+            fontWeight: 800,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            color: "var(--muted)",
+          }}
+        >
+          Live Scores
+        </p>
+        <div className="sync-controls">
+          <button
+            className="primary-button small-button"
+            onClick={handleSyncScores}
+            disabled={isSyncing}
+            type="button"
+          >
+            {isSyncing ? "Syncing…" : "↻ Sync from ESPN"}
+          </button>
+          {scoresLastSyncedAt && (
+            <span className="sync-timestamp">{formatLastSynced(scoresLastSyncedAt)}</span>
+          )}
+        </div>
+        {syncMessage && <p className="muted small">{syncMessage}</p>}
+      </div>
+
+      {/* Tier editor (only before lock) */}
+      {!isLocked && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <p
+            style={{
+              fontSize: "0.75rem",
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--muted)",
+            }}
+          >
+            Tier Assignments
+          </p>
+          <div className="tier-preview">
+            {currentPool.tiers.map((tier) => (
+              <div className="tier-card" key={tier.id}>
+                <p>{tier.label}</p>
+                {tier.golferIds.map((gid) => {
+                  const golfer = golferMap.get(gid);
+                  if (!golfer) return null;
+                  return (
+                    <div className="tier-golfer commissioner-golfer" key={golfer.id}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <strong style={{ fontSize: "0.85rem" }}>{golfer.name}</strong>
+                        <span
+                          className="muted small"
+                          style={{ display: "block", marginTop: 2 }}
+                        >
+                          {golfer.oddsAmerican > 0
+                            ? `+${golfer.oddsAmerican}`
+                            : golfer.oddsAmerican}{" "}
+                          • {(golfer.impliedProbability * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <select
+                        value={tier.id}
+                        onChange={(e) => handleTierMove(golfer.id, e.target.value)}
+                        style={{
+                          border: "1px solid var(--line)",
+                          borderRadius: 10,
+                          padding: "4px 8px",
+                          fontSize: "0.8rem",
+                          background: "white",
+                        }}
+                      >
+                        {currentPool.tiers.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main PoolPage
+// ---------------------------------------------------------------------------
+
+export function PoolPage({ poolId }: { poolId: string }) {
+  const { state, currentUser, isReady } = useAppState();
+
+  const pool = state.pools.find((p) => p.id === poolId);
+  const tournament = state.tournaments.find((t) => t.id === pool?.tournamentId);
+
+  // Local golfer map — starts from store, patched live via Supabase Realtime
+  const [golferMap, setGolferMap] = useState<Map<string, Golfer>>(new Map());
+  const [localSyncedAt, setLocalSyncedAt] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabId>("picks");
+
+  useEffect(() => {
+    const storeGolfers = state.golfers.filter(
+      (g) => g.tournamentId === tournament?.id,
+    );
+    setGolferMap(new Map(storeGolfers.map((g) => [g.id, g])));
+  }, [state.golfers, tournament?.id]);
+
+  // Supabase Realtime — live score updates
+  useEffect(() => {
+    if (!tournament?.id) return;
+    const tid = tournament.id;
+    let cleanup: (() => void) | null = null;
+
+    void getSupabaseBrowserClient().then((supabase) => {
+      const channel = supabase
+        .channel(`golfers-${tid}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "golfers",
+            filter: `tournament_id=eq.${tid}`,
+          },
+          (payload) => {
+            const updated = payload.new as {
+              id: string;
+              tournament_id: string;
+              name: string;
+              odds_american: number;
+              implied_probability: number;
+              current_score_to_par: number;
+              position: string;
+              made_cut: boolean;
+              rounds_complete: number;
+            };
+            setGolferMap((prev) => {
+              const next = new Map(prev);
+              next.set(updated.id, {
+                id: updated.id,
+                tournamentId: updated.tournament_id,
+                name: updated.name,
+                oddsAmerican: updated.odds_american,
+                impliedProbability: updated.implied_probability,
+                currentScoreToPar: updated.current_score_to_par,
+                position: updated.position,
+                madeCut: updated.made_cut,
+                roundsComplete: updated.rounds_complete,
+              });
+              return next;
+            });
+          },
+        )
+        .subscribe();
+
+      cleanup = () => {
+        void supabase.removeChannel(channel);
+      };
+    });
+
+    return () => cleanup?.();
+  }, [tournament?.id]);
+
+  const liveGolfers = useMemo(() => Array.from(golferMap.values()), [golferMap]);
+  const liveState = useMemo(
+    () => ({ ...state, golfers: liveGolfers }),
+    [state, liveGolfers],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Guards
+  // ---------------------------------------------------------------------------
+
   if (!isReady) {
     return (
       <main className="centered-page">
         <div className="panel callback-panel">
-          <h1>Checking access</h1>
-          <p className="muted">We’re refreshing your membership before loading this pool.</p>
+          <div className="skeleton-line tall medium" />
+          <div className="skeleton-line short" />
+          <p className="muted small" style={{ marginTop: 4 }}>Loading pool…</p>
         </div>
       </main>
     );
@@ -40,9 +653,11 @@ export function PoolPage({ poolId }: { poolId: string }) {
   if (!pool || !tournament) {
     return (
       <main className="centered-page">
-        <div className="panel callback-panel">
-          <h1>Pool not found</h1>
-          <Link className="primary-button" href="/">
+        <div className="panel callback-panel" style={{ gap: 14, display: "flex", flexDirection: "column" }}>
+          <p className="eyebrow">Not found</p>
+          <h1 style={{ fontSize: "1.8rem" }}>Pool not found</h1>
+          <p className="muted">This pool doesn&apos;t exist or hasn&apos;t loaded yet.</p>
+          <Link className="primary-button" href="/" style={{ alignSelf: "flex-start" }}>
             Return home
           </Link>
         </div>
@@ -52,21 +667,33 @@ export function PoolPage({ poolId }: { poolId: string }) {
 
   const currentPool = pool;
   const currentTournament = tournament;
-  const memberUsers = state.users.filter((user) => currentPool.memberUserIds.includes(user.id));
-  const validation = validateSelections(currentPool, selections);
 
   const isAdmin = currentUser?.id === currentPool.adminUserId;
-  const isMember = currentUser ? currentPool.memberUserIds.includes(currentUser.id) : false;
+  const isMember = currentUser
+    ? currentPool.memberUserIds.includes(currentUser.id)
+    : false;
   const isLocked = isPoolLocked(currentPool);
+  const memberUsers = state.users.filter((u) =>
+    currentPool.memberUserIds.includes(u.id),
+  );
+  const existingEntry = currentUser
+    ? state.entries.find(
+        (e) => e.poolId === poolId && e.userId === currentUser.id,
+      )
+    : null;
+  const leaderboard = buildLeaderboard(liveState, currentPool);
 
   if (!currentUser || (!isAdmin && !isMember)) {
     return (
       <main className="centered-page">
-        <div className="panel callback-panel">
+        <div className="panel callback-panel" style={{ gap: 14, display: "flex", flexDirection: "column" }}>
           <p className="eyebrow">Restricted</p>
-          <h1>This pool is only visible to joined members.</h1>
-          <p className="muted">Join from a valid invite link or enter the join code from your dashboard.</p>
-          <Link className="primary-button" href="/">
+          <h1 style={{ fontSize: "1.6rem" }}>Members only</h1>
+          <p className="muted">
+            This pool is only visible to joined members. Use an invite link or
+            enter the join code from your dashboard.
+          </p>
+          <Link className="primary-button" href="/" style={{ alignSelf: "flex-start" }}>
             Return home
           </Link>
         </div>
@@ -74,239 +701,135 @@ export function PoolPage({ poolId }: { poolId: string }) {
     );
   }
 
-  function updateSelection(tierId: string, golferId: string) {
-    setDraftMessage(null);
-    setSelections((current) => {
-      const withoutTier = current.filter((selection) => selection.tierId !== tierId);
-      return [...withoutTier, { tierId, golferId }];
-    });
-  }
+  // Which tabs to show
+  const tabs: { id: TabId; label: string; badge?: number }[] = [
+    { id: "picks", label: "My Picks" },
+    { id: "leaderboard", label: "Leaderboard", badge: leaderboard.length || undefined },
+    { id: "members", label: "Members", badge: memberUsers.length || undefined },
+    ...(isAdmin ? [{ id: "admin" as TabId, label: "⚙ Admin" }] : []),
+  ];
 
-  function handleTierMove(golferId: string, nextTierId: string) {
-    const nextTiers = currentPool.tiers.map((tier) => ({
-      ...tier,
-      golferIds: tier.golferIds.filter((id) => id !== golferId),
-    }));
-    const targetTier = nextTiers.find((tier) => tier.id === nextTierId);
-    if (!targetTier) {
-      return;
-    }
-    targetTier.golferIds = [...targetTier.golferIds, golferId];
-    updatePoolTiers(currentPool.id, nextTiers);
-  }
-
-  async function handleInvite() {
-    await inviteEmails(
-      currentPool.id,
-      inviteInput
-        .split(",")
-        .map((email) => email.trim())
-        .filter(Boolean),
-    );
-    setInviteInput("");
-  }
-
-  async function handleSave(submit: boolean) {
-    if (submit && !validation.isValid) {
-      setDraftMessage(validation.errors[0] ?? "Your entry is not ready to submit.");
-      return;
-    }
-
-    const entry = await saveEntry(currentPool.id, selections, submit);
-    setDraftMessage(entry ? (submit ? "Team submitted." : "Draft saved.") : "Unable to save your entry.");
-  }
+  const statusLabel = isLocked ? "In progress" : `Locks ${formatDate(currentPool.lockAt)}`;
 
   return (
-    <main className="page-shell">
-      <section className="pool-header">
-        <div>
-          <p className="eyebrow">{currentTournament.name}</p>
-          <h1>{currentPool.name}</h1>
-          <p className="muted">
-            {currentTournament.course} • Locks {formatDate(currentPool.lockAt)}
-          </p>
-        </div>
-        <div className="stack-right">
-          <span className="pill">Join code {currentPool.joinCode}</span>
-          <Link className="secondary-button" href={poolSharePath(currentPool)}>
-            Share join link
+    <main className="pool-page-shell">
+      {/* ── Pool header ─────────────────────────────────────────────────── */}
+      <header className="pool-page-header">
+        {/* Back nav + share */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 10,
+          }}
+        >
+          <Link
+            href="/"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: "0.85rem",
+              fontWeight: 700,
+              color: "var(--muted)",
+            }}
+          >
+            ← Pools
           </Link>
+          <div className="pool-page-actions">
+            <span className="pill" style={{ fontSize: "0.8rem" }}>
+              {currentPool.joinCode}
+            </span>
+            <Link className="secondary-button small-button" href={poolSharePath(currentPool)}>
+              Share
+            </Link>
+          </div>
         </div>
-      </section>
 
-      <section className="grid pool-grid">
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Draft Board</h2>
-            <span className="panel-kicker">Pick one golfer per tier</span>
+        {/* Title block */}
+        <div className="pool-page-header-top">
+          <div>
+            <p className="eyebrow">{currentTournament.name}</p>
+            <h1 className="pool-page-title">{currentPool.name}</h1>
+            <p className="pool-page-sub">
+              {currentTournament.course} · {statusLabel}
+            </p>
           </div>
-          {!currentUser ? (
-            <p className="muted">Sign in to join the pool and submit a team.</p>
-          ) : !isMember ? (
-            <p className="muted">Join this pool before making your picks.</p>
-          ) : (
-            <div className="stack">
-              <div className="notice">
-                <p>{isLocked ? "The pool is locked. Picks are now read-only." : `${selections.length}/6 golfers selected.`}</p>
-                {!validation.isValid && selections.length > 0 ? <p className="muted">{validation.errors[0]}</p> : null}
-              </div>
-              {currentPool.tiers.map((tier) => (
-                <label className="field" key={tier.id}>
-                  <span>{tier.label}</span>
-                  <select
-                    value={selections.find((selection) => selection.tierId === tier.id)?.golferId ?? ""}
-                    onChange={(event) => updateSelection(tier.id, event.target.value)}
-                    disabled={isLocked}
-                  >
-                    <option value="">Select a golfer</option>
-                    {tier.golferIds.map((golferId) => {
-                      const golfer = golferLookup.get(golferId);
-                      if (!golfer) {
-                        return null;
-                      }
-                      return (
-                        <option key={golfer.id} value={golfer.id}>
-                          {golfer.name} • {golfer.oddsAmerican > 0 ? `+${golfer.oddsAmerican}` : golfer.oddsAmerican}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-              ))}
-              <div className="draft-actions">
-                <button
-                  className="secondary-button"
-                  onClick={() => handleSave(false)}
-                  type="button"
-                >
-                  Save draft
-                </button>
-                <button
-                  className="primary-button"
-                  onClick={() => handleSave(true)}
-                  disabled={!validation.isValid || isLocked}
-                  type="button"
-                >
-                  Submit team
-                </button>
-              </div>
-              {draftMessage ? <p className="muted">{draftMessage}</p> : null}
-              {existingEntry?.submittedAt ? (
-                <p className="muted">Submitted {formatDate(existingEntry.submittedAt)}</p>
-              ) : (
-                <p className="muted">Drafts can be saved before final submission.</p>
+          {isLocked && (
+            <span className="status-pill live" style={{ flexShrink: 0 }}>
+              Live
+            </span>
+          )}
+        </div>
+
+        {/* Tab bar */}
+        <div className="pool-tab-bar" role="tablist">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={`pool-tab-item${activeTab === tab.id ? " active" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+            >
+              {tab.label}
+              {tab.badge !== undefined && (
+                <span className="pool-tab-badge">{tab.badge}</span>
               )}
-            </div>
-          )}
-        </article>
+            </button>
+          ))}
+        </div>
+      </header>
 
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Leaderboard</h2>
-            <span className="panel-kicker">Best four made-cut golfers count</span>
-          </div>
-          <div className="leaderboard">
-            {leaderboard.map((row, index) => (
-              <div className="leaderboard-row" key={row.entryId}>
-                <div>
-                  <p className="rankline">
-                    <span>#{index + 1}</span> {row.teamName}
-                  </p>
-                  <p className="muted small">
-                    {row.status === "eliminated"
-                      ? "Eliminated: fewer than four golfers made the cut."
-                      : currentUser?.id === row.userId
-                        ? row.countingGolfers.map((golfer) => `${golfer.name} (${golfer.currentScoreToPar})`).join(", ")
-                        : "Picks are private until you view your own entry."}
-                  </p>
-                  {currentUser?.id === row.userId && row.benchGolfers.length > 0 ? (
-                    <p className="muted small">
-                      Bench: {row.benchGolfers.map((golfer) => `${golfer.name} (${golfer.position})`).join(", ")}
-                    </p>
-                  ) : null}
-                </div>
-                <strong>{row.teamScore === null ? "E" : row.teamScore}</strong>
-              </div>
-            ))}
-          </div>
-        </article>
+      {/* ── Tab content ─────────────────────────────────────────────────── */}
+      <div className="pool-tab-content" role="tabpanel">
+        {activeTab === "picks" && (
+          <PicksTab
+            pool={currentPool}
+            golferMap={golferMap}
+            isLocked={isLocked}
+            isMember={isMember}
+            existingEntry={existingEntry ?? null}
+            currentUser={currentUser}
+          />
+        )}
 
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Contestants</h2>
-            <span className="panel-kicker">Who is in and who has submitted</span>
-          </div>
-          <div className="stack">
-            {memberUsers.map((member) => {
-              const entry = state.entries.find((candidate) => candidate.poolId === currentPool.id && candidate.userId === member.id);
-              return (
-                <div className="list-link" key={member.id}>
-                  <div>
-                    <strong>{member.userName}</strong>
-                    <p className="muted small">{member.email}</p>
-                  </div>
-                  <span className="pill">{entry?.submittedAt ? "Submitted" : entry ? "Draft saved" : "Not started"}</span>
-                </div>
-              );
-            })}
-          </div>
-        </article>
+        {activeTab === "leaderboard" && (
+          <LeaderboardTab
+            leaderboard={leaderboard}
+            isLocked={isLocked}
+            isMember={isMember}
+            currentUserId={currentUser?.id ?? null}
+            tournamentId={currentTournament.id}
+            scoresLastSyncedAt={localSyncedAt ?? state.scoresLastSyncedAt}
+            onScoresSynced={setLocalSyncedAt}
+          />
+        )}
 
-        <article className="panel span-two">
-          <div className="panel-header">
-            <h2>Commissioner Controls</h2>
-            <span className="panel-kicker">Adjust tiers and manage invites</span>
-          </div>
-          {isAdmin ? (
-            <div className="stack">
-              <div className="tier-preview">
-                {currentPool.tiers.map((tier) => (
-                  <div className="tier-card" key={tier.id}>
-                    <p>{tier.label}</p>
-                    {tier.golferIds.map((golferId) => {
-                      const golfer = golferLookup.get(golferId);
-                      if (!golfer) {
-                        return null;
-                      }
-                      return (
-                        <div className="tier-golfer commissioner-golfer" key={golfer.id}>
-                          <div>
-                            <strong>{golfer.name}</strong>
-                            <span className="muted small">
-                              {golfer.oddsAmerican > 0 ? `+${golfer.oddsAmerican}` : golfer.oddsAmerican} •{" "}
-                              {(golfer.impliedProbability * 100).toFixed(1)}% implied
-                            </span>
-                          </div>
-                          <select
-                            value={tier.id}
-                            onChange={(event) => handleTierMove(golfer.id, event.target.value)}
-                          >
-                            {currentPool.tiers.map((optionTier) => (
-                              <option key={optionTier.id} value={optionTier.id}>
-                                {optionTier.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-              <label className="field">
-                <span>Add invite emails</span>
-                <textarea rows={3} value={inviteInput} onChange={(event) => setInviteInput(event.target.value)} />
-              </label>
-              <button className="primary-button" onClick={handleInvite} type="button">
-                Add invites
-              </button>
-              <p className="muted">Invited: {currentPool.invitedEmails.join(", ") || "None yet"}</p>
-            </div>
-          ) : (
-            <p className="muted">Only the commissioner can change tiers and manage invites.</p>
-          )}
-        </article>
-      </section>
+        {activeTab === "members" && (
+          <MembersTab
+            memberUsers={memberUsers}
+            poolId={currentPool.id}
+            currentPool={currentPool}
+            entries={state.entries}
+            isAdmin={isAdmin}
+            isLocked={isLocked}
+          />
+        )}
+
+        {activeTab === "admin" && isAdmin && (
+          <AdminTab
+            currentPool={currentPool}
+            golferMap={golferMap}
+            isLocked={isLocked}
+            tournamentId={currentTournament.id}
+            scoresLastSyncedAt={localSyncedAt ?? state.scoresLastSyncedAt}
+            onScoresSynced={setLocalSyncedAt}
+          />
+        )}
+      </div>
     </main>
   );
 }
