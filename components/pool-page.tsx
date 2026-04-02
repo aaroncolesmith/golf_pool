@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DraftBoard } from "@/components/draft-board";
 import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
 import { buildLeaderboard } from "@/lib/scoring";
@@ -56,58 +56,37 @@ function PicksTab({
     existingEntry?.selections ?? [],
   );
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
-  // Track whether selections have changed since last submit
-  const [lastSubmittedSelections, setLastSubmittedSelections] = useState<TeamSelection[]>(
-    existingEntry?.submittedAt ? (existingEntry?.selections ?? []) : [],
-  );
+  // Prevent server data from overwriting local state once the user starts editing
+  const userIsEditingRef = useRef(false);
 
   useEffect(() => {
-    const incoming = existingEntry?.selections ?? [];
-    setSelections(incoming);
-    if (existingEntry?.submittedAt) {
-      setLastSubmittedSelections(incoming);
-    }
+    if (userIsEditingRef.current) return;
+    setSelections(existingEntry?.selections ?? []);
   }, [existingEntry]);
-
-  // isDirty: selections differ from what was last submitted
-  const isDirty = useMemo(() => {
-    if (selections.length !== lastSubmittedSelections.length) return true;
-    return selections.some(
-      (s) => !lastSubmittedSelections.some((ls) => ls.tierId === s.tierId && ls.golferId === s.golferId),
-    );
-  }, [selections, lastSubmittedSelections]);
-
-  // Auto-save (draft, not submit) 1.5 s after selections change
-  useEffect(() => {
-    if (selections.length === 0 || isLocked) return;
-    const timer = setTimeout(() => {
-      saveEntry(pool.id, selections, false);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [selections, pool.id, isLocked, saveEntry]);
 
   const validation = validateSelections(pool, selections);
 
+  // Auto-save on every change. Submit when all picks are complete.
+  useEffect(() => {
+    if (selections.length === 0 || isLocked) return;
+    const isComplete = validation.isValid;
+    const timer = setTimeout(() => {
+      saveEntry(pool.id, selections, isComplete).then((entry) => {
+        if (entry && isComplete) {
+          setDraftMessage("All picks saved ✓");
+        }
+      });
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [selections, pool.id, isLocked, saveEntry, validation.isValid]);
+
   function updateSelection(tierId: string, golferId: string) {
+    userIsEditingRef.current = true;
     setDraftMessage(null);
     setSelections((prev) => {
       const withoutTier = prev.filter((s) => s.tierId !== tierId);
       return [...withoutTier, { tierId, golferId }];
     });
-  }
-
-  async function handleSubmit() {
-    if (!validation.isValid) {
-      setDraftMessage(validation.errors[0] ?? "Your picks aren't complete yet.");
-      return;
-    }
-    const entry = await saveEntry(pool.id, selections, true);
-    if (entry) {
-      setDraftMessage("Team submitted! ✓");
-      setLastSubmittedSelections(selections);
-    } else {
-      setDraftMessage("Unable to submit — the pool may be locked.");
-    }
   }
 
   if (!currentUser) {
@@ -136,12 +115,10 @@ function PicksTab({
       golferMap={golferMap}
       selections={selections}
       onSelectionChange={updateSelection}
-      onSubmit={handleSubmit}
       draftMessage={draftMessage}
       existingSubmittedAt={existingEntry?.submittedAt ?? null}
       isLocked={isLocked}
       isValid={validation.isValid}
-      isDirty={isDirty}
     />
   );
 }
