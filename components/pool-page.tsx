@@ -56,10 +56,35 @@ function PicksTab({
     existingEntry?.selections ?? [],
   );
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
+  // Track whether selections have changed since last submit
+  const [lastSubmittedSelections, setLastSubmittedSelections] = useState<TeamSelection[]>(
+    existingEntry?.submittedAt ? (existingEntry?.selections ?? []) : [],
+  );
 
   useEffect(() => {
-    setSelections(existingEntry?.selections ?? []);
+    const incoming = existingEntry?.selections ?? [];
+    setSelections(incoming);
+    if (existingEntry?.submittedAt) {
+      setLastSubmittedSelections(incoming);
+    }
   }, [existingEntry]);
+
+  // isDirty: selections differ from what was last submitted
+  const isDirty = useMemo(() => {
+    if (selections.length !== lastSubmittedSelections.length) return true;
+    return selections.some(
+      (s) => !lastSubmittedSelections.some((ls) => ls.tierId === s.tierId && ls.golferId === s.golferId),
+    );
+  }, [selections, lastSubmittedSelections]);
+
+  // Auto-save (draft, not submit) 1.5 s after selections change
+  useEffect(() => {
+    if (selections.length === 0 || isLocked) return;
+    const timer = setTimeout(() => {
+      saveEntry(pool.id, selections, false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [selections, pool.id, isLocked, saveEntry]);
 
   const validation = validateSelections(pool, selections);
 
@@ -71,19 +96,18 @@ function PicksTab({
     });
   }
 
-  async function handleSave(submit: boolean) {
-    if (submit && !validation.isValid) {
+  async function handleSubmit() {
+    if (!validation.isValid) {
       setDraftMessage(validation.errors[0] ?? "Your picks aren't complete yet.");
       return;
     }
-    const entry = await saveEntry(pool.id, selections, submit);
-    setDraftMessage(
-      entry
-        ? submit
-          ? "Team submitted! ✓"
-          : "Draft saved."
-        : "Unable to save — the pool may be locked.",
-    );
+    const entry = await saveEntry(pool.id, selections, true);
+    if (entry) {
+      setDraftMessage("Team submitted! ✓");
+      setLastSubmittedSelections(selections);
+    } else {
+      setDraftMessage("Unable to submit — the pool may be locked.");
+    }
   }
 
   if (!currentUser) {
@@ -112,12 +136,12 @@ function PicksTab({
       golferMap={golferMap}
       selections={selections}
       onSelectionChange={updateSelection}
-      onSave={handleSave}
+      onSubmit={handleSubmit}
       draftMessage={draftMessage}
       existingSubmittedAt={existingEntry?.submittedAt ?? null}
       isLocked={isLocked}
       isValid={validation.isValid}
-      validationError={validation.errors[0] ?? null}
+      isDirty={isDirty}
     />
   );
 }

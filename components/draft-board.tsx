@@ -8,12 +8,12 @@ type Props = {
   golferMap: Map<string, Golfer>;
   selections: TeamSelection[];
   onSelectionChange: (tierId: string, golferId: string) => void;
-  onSave: (submit: boolean) => void;
+  onSubmit: () => void;
   draftMessage: string | null;
   existingSubmittedAt: string | null;
   isLocked: boolean;
   isValid: boolean;
-  validationError: string | null;
+  isDirty: boolean; // picks have changed since last submit
 };
 
 // ---------------------------------------------------------------------------
@@ -117,12 +117,12 @@ export function DraftBoard({
   golferMap,
   selections,
   onSelectionChange,
-  onSave,
+  onSubmit,
   draftMessage,
   existingSubmittedAt,
   isLocked,
   isValid,
-  validationError,
+  isDirty,
 }: Props) {
   const [activeTierIndex, setActiveTierIndex] = useState(0);
 
@@ -143,19 +143,28 @@ export function DraftBoard({
 
   if (!activeTier) return null;
 
-  const activeSelection = selections.find((s) => s.tierId === activeTier.id)?.golferId ?? null;
-  const selectedGolfer = activeSelection ? golferMap.get(activeSelection) : null;
-  const allPicked = selections.length === totalTiers;
-  const isLastTier = activeTierIndex === totalTiers - 1;
+  const activeGolferId = selections.find((s) => s.tierId === activeTier.id)?.golferId ?? null;
+  const selectedGolfer = activeGolferId ? golferMap.get(activeGolferId) : null;
+
+  // Submit is active when all picks are made AND (not yet submitted OR picks changed)
+  const submitActive = isValid && (!existingSubmittedAt || isDirty);
+  const submitLabel = !isValid
+    ? "Submit ✓"
+    : isDirty || !existingSubmittedAt
+      ? "Submit ✓"
+      : "Submitted ✓";
 
   function handlePickGolfer(tierId: string, golferId: string) {
-    // If same golfer clicked again, deselect
-    const current = selections.find((s) => s.tierId === tierId)?.golferId;
-    if (current === golferId) return;
     onSelectionChange(tierId, golferId);
-    // Auto-advance after a short delay so the selection highlight is visible
-    if (!isLastTier) {
-      setTimeout(() => setActiveTierIndex((i) => i + 1), 260);
+    // Auto-advance to next unpicked tier
+    const currentIdx = tiers.findIndex((t) => t.id === tierId);
+    const nextUnpicked = tiers.findIndex(
+      (t, i) => i > currentIdx && !selections.some((s) => s.tierId === t.id && s.golferId !== (t.id === tierId ? golferId : "")),
+    );
+    if (nextUnpicked !== -1) {
+      setTimeout(() => setActiveTierIndex(nextUnpicked), 240);
+    } else if (currentIdx < totalTiers - 1) {
+      setTimeout(() => setActiveTierIndex(currentIdx + 1), 240);
     }
   }
 
@@ -165,61 +174,56 @@ export function DraftBoard({
 
   return (
     <div className="draft-board">
-      {/* ── Top controls: Back | progress + tier label | Next ── */}
+      {/* ── Top bar: Back | tier chips | Submit ── */}
       <div className="draft-controls">
         <button
           className="draft-nav-btn back"
           type="button"
           onClick={() => goTo(activeTierIndex - 1)}
           disabled={activeTierIndex === 0}
+          aria-label="Previous tier"
         >
           ← Back
         </button>
 
-        <div className="draft-controls-center">
-          <span className="draft-tier-label">{activeTier.label}</span>
-          <div className="draft-progress">
-            {tiers.map((tier, idx) => {
-              const isPicked = selections.some((s) => s.tierId === tier.id);
-              const isActive = idx === activeTierIndex;
-              return (
-                <button
-                  key={tier.id}
-                  className={`draft-progress-dot${isPicked ? " done" : isActive ? " active" : ""}`}
-                  onClick={() => goTo(idx)}
-                  type="button"
-                  title={tier.label}
-                  aria-label={`Go to ${tier.label}`}
-                />
-              );
-            })}
-          </div>
-          <span className="draft-tier-step">{activeTierIndex + 1} of {totalTiers}</span>
+        {/* Tier chips */}
+        <div className="draft-tier-chips">
+          {tiers.map((tier, idx) => {
+            const sel = selections.find((s) => s.tierId === tier.id);
+            const g = sel ? golferMap.get(sel.golferId) : null;
+            const isActive = idx === activeTierIndex;
+            const isPicked = !!g;
+
+            return (
+              <button
+                key={tier.id}
+                className={`draft-tier-chip${isActive ? " active" : ""}${isPicked && !isActive ? " picked" : ""}${!isPicked && !isActive ? " empty" : ""}`}
+                onClick={() => goTo(idx)}
+                type="button"
+                title={g ? g.name : `Pick ${tier.label}`}
+              >
+                <span className="draft-tier-chip-label">{tier.label}</span>
+                <span className={`draft-tier-chip-golfer${!isPicked ? " unpicked" : ""}`}>
+                  {g ? g.name : "SELECT"}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {isLastTier ? (
-          <button
-            className="draft-nav-btn submit"
-            type="button"
-            onClick={() => onSave(true)}
-            disabled={!isValid}
-            title={isValid ? "Submit your picks" : (validationError ?? "Complete all tiers first")}
-          >
-            Submit ✓
-          </button>
-        ) : (
-          <button
-            className="draft-nav-btn next"
-            type="button"
-            onClick={() => goTo(activeTierIndex + 1)}
-          >
-            Next →
-          </button>
-        )}
+        <button
+          className={`draft-nav-btn${submitActive ? " submit" : " submit-disabled"}`}
+          type="button"
+          onClick={submitActive ? onSubmit : undefined}
+          disabled={!submitActive}
+          title={!isValid ? `${totalTiers - selections.length} more picks needed` : "Submit your team"}
+        >
+          {submitLabel}
+        </button>
       </div>
 
-      {/* ── Selection chip — shows current pick or prompt ── */}
-      <div className={`draft-selection-chip ${selectedGolfer ? "picked" : "empty"}`}>
+      {/* ── Selection chip — current pick or prompt ── */}
+      <div className={`draft-selection-chip${selectedGolfer ? " picked" : " empty"}`}>
         {selectedGolfer ? (
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -232,19 +236,18 @@ export function DraftBoard({
             <span className="draft-selection-chip-check" aria-hidden="true">✓</span>
           </>
         ) : (
-          <>
-            <span style={{ fontSize: "0.88rem" }}>Pick a golfer for {activeTier.label} ↓</span>
-            <span style={{ fontSize: "1rem" }}>⬇</span>
-          </>
+          <span style={{ fontSize: "0.88rem", color: "var(--muted)" }}>
+            Pick a golfer for {activeTier.label} below ↓
+          </span>
         )}
       </div>
 
-      {/* ── Golfer card grid — 3 columns, compact ── */}
+      {/* ── Golfer grid — 3 columns, compact ── */}
       <div className="golfer-option-grid">
         {activeTier.golferIds.map((gid) => {
           const g = golferMap.get(gid);
           if (!g) return null;
-          const isSelected = activeSelection === g.id;
+          const isSelected = activeGolferId === g.id;
           return (
             <button
               key={g.id}
@@ -270,77 +273,13 @@ export function DraftBoard({
         })}
       </div>
 
-      {/* ── Picks summary — all tiers, clickable to jump ── */}
-      <div>
-        <p style={{
-          fontSize: "0.72rem",
-          fontWeight: 800,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: "var(--muted)",
-          marginBottom: 0,
-        }}>
-          Your team
+      {/* ── Status line ── */}
+      {(draftMessage || (!isValid && selections.length > 0)) && (
+        <p className={`small${draftMessage?.includes("✓") || draftMessage?.includes("saved") ? "" : " muted"}`}
+          style={{ marginTop: 4, textAlign: "center" }}>
+          {draftMessage ?? `${selections.length} of ${totalTiers} picks made`}
         </p>
-        <div className="draft-summary">
-          {tiers.map((tier, idx) => {
-            const sel = selections.find((s) => s.tierId === tier.id);
-            const g = sel ? golferMap.get(sel.golferId) : null;
-            const isActiveTier = idx === activeTierIndex;
-            return (
-              <div
-                key={tier.id}
-                className={`draft-summary-row${isActiveTier ? " active-tier" : ""}`}
-                onClick={() => goTo(idx)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === "Enter" && goTo(idx)}
-              >
-                <div className="draft-summary-left">
-                  <span className="draft-summary-tier">{tier.label}</span>
-                  {g ? (
-                    <span className="draft-summary-golfer">{g.name}</span>
-                  ) : (
-                    <span className="muted small">Not picked yet</span>
-                  )}
-                </div>
-                <span className="draft-summary-edit">{isActiveTier ? "current" : g ? "edit" : "pick →"}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Action footer ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {draftMessage && (
-            <p className={`small${draftMessage.includes("✓") || draftMessage.includes("saved") ? "" : " muted"}`}>
-              {draftMessage}
-            </p>
-          )}
-          {!draftMessage && validationError && (
-            <p className="muted small">{validationError}</p>
-          )}
-          {!draftMessage && existingSubmittedAt && (
-            <p className="muted small">Submitted — update anytime before lock.</p>
-          )}
-          {!draftMessage && !existingSubmittedAt && selections.length > 0 && !allPicked && (
-            <p className="muted small">{selections.length} of {totalTiers} tiers picked.</p>
-          )}
-        </div>
-
-        {selections.length > 0 && (
-          <button
-            className="secondary-button small-button"
-            type="button"
-            onClick={() => onSave(false)}
-            style={{ flexShrink: 0 }}
-          >
-            Save draft
-          </button>
-        )}
-      </div>
+      )}
     </div>
   );
 }

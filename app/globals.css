@@ -830,6 +830,94 @@ button:disabled {
   background: rgba(28, 110, 231, 0.4);
 }
 
+/* ── Tier chips (top bar) ── */
+.draft-tier-chips {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  min-width: 0;
+  scrollbar-width: none;
+}
+
+.draft-tier-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.draft-tier-chip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1.5px solid var(--line);
+  background: var(--surface-muted);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 100ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.draft-tier-chip.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.draft-tier-chip.picked:not(.active) {
+  background: rgba(15, 143, 95, 0.08);
+  border-color: rgba(15, 143, 95, 0.35);
+}
+
+.draft-tier-chip.empty:not(.active) {
+  border-style: dashed;
+  background: transparent;
+}
+
+.draft-tier-chip:hover:not(.active) {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+}
+
+.draft-tier-chip-label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.draft-tier-chip.active .draft-tier-chip-label {
+  color: var(--primary);
+}
+
+.draft-tier-chip-golfer {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-tier-chip-golfer.unpicked {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+}
+
+/* submit-disabled variant */
+.draft-nav-btn.submit-disabled {
+  background: rgba(21, 32, 43, 0.08);
+  color: var(--muted);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
 /* ── Selection chip ── */
 .draft-selection-chip {
   display: flex;
