@@ -450,15 +450,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (error || !data) return null;
 
-        await loadState();
-
-        return {
+        const savedEntry: PoolEntry = {
           id: data.id,
           poolId: data.pool_id,
           userId: data.user_id,
           selections: Array.isArray(data.selections) ? (data.selections as TeamSelection[]) : [],
           submittedAt: data.submitted_at,
         };
+
+        if (submit) {
+          // Full reload on actual submit so leaderboard etc. stay in sync
+          await loadState();
+        } else {
+          // For silent auto-saves, just patch the local entry — no full reload
+          // avoids triggering existingEntry → setSelections → auto-save loop
+          setState((prev) => ({
+            ...prev,
+            entries: prev.entries.some((e) => e.poolId === poolId && e.userId === currentUser.id)
+              ? prev.entries.map((e) =>
+                  e.poolId === poolId && e.userId === currentUser.id ? savedEntry : e,
+                )
+              : [...prev.entries, savedEntry],
+          }));
+        }
+
+        return savedEntry;
       },
 
       // -- Tournament data ----------------------------------------------------
