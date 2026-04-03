@@ -132,9 +132,14 @@ export async function POST(request: Request) {
     });
   }
 
+  // Deduplicate by id — ESPN occasionally lists the same golfer twice
+  const dedupedUpdates = Array.from(
+    new Map(updates.map((u) => [u.id, u])).values(),
+  );
+
   // Write score updates to Supabase in a single upsert
-  if (updates.length > 0) {
-    const { error: upsertError } = await supabase.from("golfers").upsert(updates, { onConflict: "id" });
+  if (dedupedUpdates.length > 0) {
+    const { error: upsertError } = await supabase.from("golfers").upsert(dedupedUpdates, { onConflict: "id" });
 
     if (upsertError) {
       console.error("[sync] Upsert error:", upsertError);
