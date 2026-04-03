@@ -1,0 +1,36 @@
+name: Sync Golf Scores
+
+on:
+  schedule:
+    # Every 10 minutes, Thursday–Sunday, 7am–9pm ET (11:00–01:00 UTC)
+    # Cron runs in UTC. ET = UTC-4 (EDT). 7am ET = 11:00 UTC, 9pm ET = 01:00 UTC next day.
+    #
+    # GitHub Actions cron does not support day-of-week ranges natively, so we
+    # use four separate schedules (Thu=4, Fri=5, Sat=6, Sun=0).
+    - cron: "*/10 11-23 * * 4,5,6"   # Thu/Fri/Sat 11:00–23:50 UTC (7am–7:50pm ET)
+    - cron: "*/10 0-1  * * 5,6,0"    # Fri/Sat/Sun 00:00–01:50 UTC (8pm–9:50pm ET prior day)
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Sync scores
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X GET "${{ secrets.APP_URL }}/api/scores/cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP status: $response"
+          if [ "$response" != "200" ]; then
+            echo "Score sync failed with status $response"
+            exit 1
+          fi
+
+      - name: Log response
+        if: always()
+        run: |
+          curl -s \
+            -X GET "${{ secrets.APP_URL }}/api/scores/cron" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" | jq .
