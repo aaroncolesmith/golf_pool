@@ -181,6 +181,7 @@ function MasterboardCard({
           {/* Counting golfer rows */}
           {row.countingGolfers.map((g) => (
             <div key={g.id} className="mb-row mb-row--counting">
+              <span className="mb-row-indent" />
               <span className="mb-row-name">{lastName(g.name)}</span>
               <span className={`mb-row-score ${mbScoreClass(g.currentScoreToPar)}`}>
                 {mbScoreStr(g.currentScoreToPar)}
@@ -189,11 +190,12 @@ function MasterboardCard({
           ))}
 
           {/* Bench golfer rows */}
-          {row.benchGolfers.map((g, idx) => (
+          {row.benchGolfers.map((g) => (
             <div
               key={g.id}
-              className={`mb-row mb-row--bench${idx === 0 ? " mb-row--bench-first" : ""}${!g.madeCut ? " mb-row--cut" : ""}`}
+              className={`mb-row mb-row--bench${!g.madeCut ? " mb-row--cut" : ""}`}
             >
+              <span className="mb-row-indent" />
               <span className="mb-row-name">{lastName(g.name)}</span>
               <span className={`mb-row-score ${mbScoreClass(g.madeCut ? g.currentScoreToPar : null)}`}>
                 {g.madeCut ? mbScoreStr(g.currentScoreToPar) : "CUT"}

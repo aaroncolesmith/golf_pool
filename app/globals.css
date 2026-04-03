@@ -1186,46 +1186,50 @@ button:disabled {
    Masterboard — Augusta Masters-style card grid leaderboard
    ========================================================================== */
 
-/* Outer shell — arch top + green border */
+/*
+ * Visual spec (matches mockup):
+ *   - Outer arch container: thick green border, LIGHT CREAM interior, no dark fill
+ *   - "LEADERS" banner: cream background, large dark bold serif text
+ *   - 3-col grid of cards, each with thick green border on all sides
+ *   - Card header row: [rank] [TEAM NAME bold caps] [score] — cream bg
+ *   - Counting golfer rows: cream bg, [empty indent] [NAME] [score]
+ *   - Bench golfer rows: dark steel-blue bg
+ */
+
+/* ── Outer arch shell ─────────────────────────────────────────── */
 .mb-shell {
-  border: 2px solid #1a4731;
-  border-radius: 50% 50% 0 0 / 44px 44px 0 0;
+  border: 3px solid #1a4731;
+  border-radius: 50% 50% 0 0 / 56px 56px 0 0;
   overflow: hidden;
-  box-shadow: 0 8px 40px rgba(26, 71, 49, 0.18);
+  background: #f0ede6;
+  box-shadow: 0 8px 40px rgba(26, 71, 49, 0.2);
 }
 
-/* Arch banner */
+/* ── Arch banner (LIGHT — cream bg, dark text) ────────────────── */
 .mb-banner {
-  background: #1a4731;
-  padding: 48px 20px 18px;
+  background: #f0ede6;
+  padding: 52px 20px 20px;
   text-align: center;
+  border-bottom: 3px solid #1a4731;
 }
 
 .mb-banner-title {
   font-family: 'Georgia', 'Times New Roman', serif;
-  font-size: clamp(1.25rem, 3.5vw, 1.7rem);
+  font-size: clamp(1.4rem, 4vw, 2rem);
   font-weight: 900;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: #f0e8d0;
+  color: #15202b;
   display: block;
 }
 
-.mb-banner-sub {
-  font-size: 0.62rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(240, 232, 208, 0.55);
-  margin-top: 4px;
-  display: block;
-}
-
-/* 3-column card grid — green gaps act as borders */
+/* ── Card grid ────────────────────────────────────────────────── */
 .mb-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 2px;
-  background: #1a4731;
+  gap: 12px;
+  background: #f0ede6;
+  padding: 12px;
 }
 
 @media (max-width: 820px) {
@@ -1236,118 +1240,114 @@ button:disabled {
   .mb-grid { grid-template-columns: 1fr; }
 }
 
-/* Individual team card */
+/* ── Individual team card ─────────────────────────────────────── */
 .mb-card {
-  background: #fff;
+  border: 3px solid #1a4731;
+  background: #f7f5f0;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
 .mb-card--elim {
-  opacity: 0.45;
+  opacity: 0.5;
 }
 
-/* Card header: rank | name | total */
+/* ── Card header: rank | TEAM NAME | score ────────────────────── */
 .mb-card-hdr {
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 32px 1fr auto;
   align-items: center;
-  gap: 6px;
-  padding: 9px 10px 8px;
-  border-bottom: 2px solid #1a4731;
-  background: #fff;
+  gap: 0;
+  border-bottom: 3px solid #1a4731;
+  background: #f7f5f0;
+  min-width: 0;
 }
 
+/* vertical dividers between header cells */
 .mb-card-rank {
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   font-weight: 900;
-  color: #1a4731;
+  color: #15202b;
   text-align: center;
-  letter-spacing: 0.02em;
+  padding: 8px 4px;
+  border-right: 2px solid #1a4731;
   flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .mb-card-name {
-  font-size: 0.82rem;
-  font-weight: 800;
+  font-size: 0.8rem;
+  font-weight: 900;
   color: #15202b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  padding: 8px 8px;
+  text-align: center;
 }
 
 .mb-card-you {
   color: #b89a2e;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   margin-left: 3px;
 }
 
 .mb-card-tot {
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   flex-shrink: 0;
+  padding: 8px 10px 8px 8px;
+  border-left: 2px solid #1a4731;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
 }
 
-/* Score colours (shared by header + rows) */
+/* ── Score colours ────────────────────────────────────────────── */
 .mb-under { color: #0a5c2e; }
 .mb-over  { color: #a83228; }
 .mb-even  { color: #15202b; }
 .mb-cut   { color: #9ca8b6; }
 
-/* Golfer rows */
+/* ── Golfer rows ──────────────────────────────────────────────── */
+/*
+ * 3-column layout: [indent matching rank] [name] [score]
+ * This keeps name/score visually aligned under the card header columns
+ */
 .mb-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 32px 1fr auto;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-top: 1px solid rgba(26, 71, 49, 0.1);
+  border-top: 1px solid rgba(26, 71, 49, 0.15);
+  min-width: 0;
 }
 
-.mb-row:first-child {
-  border-top: none;
-}
-
-/* Counting golfers — white */
-.mb-row--counting {
-  background: #fff;
-}
-
-/* Bench golfers — dark steel green */
-.mb-row--bench {
-  background: #3d5a50;
-  border-top-color: #1a4731 !important;
-}
-
-/* First bench row gets a stronger separator from counting rows */
-.mb-row--bench-first {
-  border-top: 2px solid #1a4731 !important;
-}
-
-/* Hidden picks placeholder */
-.mb-row--hidden {
-  background: #fff;
-  justify-items: center;
+.mb-row-indent {
+  /* empty left cell to indent under rank column */
+  border-right: 1px solid rgba(26, 71, 49, 0.15);
+  align-self: stretch;
 }
 
 .mb-row-name {
-  font-size: 0.75rem;
-  font-weight: 800;
+  font-size: 0.76rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: #253a2e;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-}
-
-.mb-row--bench .mb-row-name {
-  color: rgba(240, 232, 208, 0.82);
+  padding: 6px 8px;
 }
 
 .mb-row-score {
@@ -1355,42 +1355,77 @@ button:disabled {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+  padding: 6px 10px 6px 6px;
+  border-left: 1px solid rgba(26, 71, 49, 0.15);
+  text-align: right;
 }
 
-/* Bench score colour overrides (lighter on dark bg) */
+/* Counting golfers — cream */
+.mb-row--counting {
+  background: #f7f5f0;
+}
+
+/* Bench golfers — dark steel-blue */
+.mb-row--bench {
+  background: #4a6070;
+  border-top: 2px solid #1a4731 !important;
+}
+
+.mb-row--bench + .mb-row--bench {
+  border-top: 1px solid rgba(255,255,255,0.12) !important;
+}
+
+.mb-row--bench .mb-row-indent {
+  border-right-color: rgba(255,255,255,0.12);
+}
+
+.mb-row--bench .mb-row-score {
+  border-left-color: rgba(255,255,255,0.12);
+}
+
+.mb-row--bench .mb-row-name {
+  color: rgba(235, 230, 218, 0.88);
+}
+
+/* Bench score colour overrides */
 .mb-row--bench .mb-under { color: #72d48e; }
 .mb-row--bench .mb-over  { color: #f4a29d; }
-.mb-row--bench .mb-even  { color: rgba(240,232,208,0.75); }
-.mb-row--bench .mb-cut   { color: rgba(240,232,208,0.4); }
+.mb-row--bench .mb-even  { color: rgba(235,230,218,0.8); }
+.mb-row--bench .mb-cut   { color: rgba(235,230,218,0.4); }
 
-/* Struck-through cut golfer on bench */
+/* Struck-through CUT golfers on bench */
 .mb-row--cut .mb-row-name {
   text-decoration: line-through;
   opacity: 0.5;
 }
 
-/* "Picks revealed at lock" text */
-.mb-hidden-msg {
-  font-size: 0.7rem;
-  color: #9ca8b6;
-  font-style: italic;
-  padding: 8px 10px;
-  text-align: center;
+/* "Picks revealed at lock" placeholder */
+.mb-row--hidden {
+  background: #f7f5f0;
 }
 
-/* Eliminated section separator */
+.mb-hidden-msg {
+  font-size: 0.68rem;
+  color: #9ca8b6;
+  font-style: italic;
+  padding: 8px;
+  text-align: center;
+  grid-column: 1 / -1;
+}
+
+/* ── Eliminated section separator ────────────────────────────── */
 .mb-elim-sep {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 4px 6px;
-  background: #1a4731;
+  gap: 12px;
+  padding: 4px 12px 0;
+  background: #f0ede6;
 }
 
 .mb-elim-sep-line {
   flex: 1;
   height: 1px;
-  background: rgba(240, 232, 208, 0.25);
+  background: rgba(26, 71, 49, 0.3);
 }
 
 .mb-elim-sep-label {
@@ -1398,7 +1433,7 @@ button:disabled {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: rgba(240, 232, 208, 0.5);
+  color: #6b8a76;
   white-space: nowrap;
 }
 
