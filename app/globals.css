@@ -51,6 +51,8 @@ body {
   background: #ffffff;
   /* Reserve space for bottom nav on mobile */
   padding-bottom: env(safe-area-inset-bottom);
+  /* Prevent horizontal overflow across all pages */
+  overflow-x: hidden;
 }
 
 a {
@@ -1183,83 +1185,193 @@ button:disabled {
 }
 
 /* ==========================================================================
-   Leaderboard
+   Masterboard — Augusta Masters-style card grid leaderboard
    ========================================================================== */
 
-.leaderboard {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+/* ── Outer arch shell ── */
+.mb-shell {
+  border: 3px solid #1a4731;
+  border-radius: 28px 28px 0 0;
+  overflow: hidden;
+  background: #edeae2;
+  box-shadow: 0 8px 40px rgba(26, 71, 49, 0.2);
 }
 
-.leaderboard-row {
-  border-bottom: 1px solid #f3f5f8;
+/* ── Banner: cream bg, large dark serif text ── */
+.mb-banner {
+  background: #edeae2;
+  padding: 22px 20px 16px;
+  text-align: center;
+  border-bottom: 3px solid #1a4731;
 }
 
-.leaderboard-row:last-child {
-  border-bottom: none;
+.mb-banner-title {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-size: clamp(1.3rem, 4vw, 2rem);
+  font-weight: 900;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #111;
+  display: block;
 }
 
-.leaderboard-row-main {
+/* ── 3-col card grid ── */
+.mb-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  background: #edeae2;
+  padding: 14px;
+}
+
+@media (max-width: 820px) { .mb-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .mb-grid { grid-template-columns: 1fr; } }
+
+/* ── Each card is a <table> — gives perfect column alignment ── */
+.mb-card {
   width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 0;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease;
+  border-collapse: collapse;
+  border: 3px solid #1a4731;
+  table-layout: fixed;
+  background: #f5f3ec;
 }
 
-.leaderboard-row-main:hover {
-  background: #fafcfe;
+.mb-card--elim { opacity: 0.5; }
+
+/* Fixed column widths */
+.mb-col-rank  { width: 36px; }
+.mb-col-score { width: 52px; }
+/* mb-col-name fills the remaining space */
+
+/* ── Header row (thead) ── */
+.mb-card thead tr {
+  background: #f5f3ec;
+  border-bottom: 3px solid #1a4731;
 }
 
-.leaderboard-rank-block {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
+.mb-card thead th {
+  padding: 8px 6px;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #111;
+  border: 1px solid #1a4731;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.leaderboard-rank {
+.mb-card thead .mb-col-rank  { text-align: center; }
+.mb-card thead .mb-col-name  { text-align: center; }
+.mb-card thead .mb-col-score { text-align: center; }
+
+/* ── Body rows ── */
+.mb-card tbody tr {
+  border-bottom: 1px solid rgba(26, 71, 49, 0.2);
+}
+
+.mb-card tbody td {
+  padding: 6px 8px;
   font-size: 0.78rem;
-  font-weight: 800;
-  color: var(--muted);
-  letter-spacing: 0.04em;
-  width: 28px;
-  flex-shrink: 0;
+  border: 1px solid rgba(26, 71, 49, 0.2);
+  overflow: hidden;
+}
+
+/* Rank cell */
+.mb-card tbody .mb-col-rank {
   text-align: center;
 }
 
-.leaderboard-name {
-  font-size: 0.95rem;
+/* Name cell */
+.mb-card tbody .mb-col-name {
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #1a2e22;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Score cell */
+.mb-card tbody .mb-col-score {
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Counting rows: cream ── */
+.mb-card tbody tr.mb-counting {
+  background: #f5f3ec;
+}
+
+/* ── Bench rows: dark steel ── */
+.mb-card tbody tr.mb-bench {
+  background: #4a6070;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.mb-card tbody tr.mb-bench td {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(235, 230, 218, 0.88);
+}
+
+.mb-card tbody tr.mb-bench .mb-col-name {
+  color: rgba(235, 230, 218, 0.88);
+}
+
+/* First bench row gets a strong separator */
+.mb-card tbody tr.mb-bench-first {
+  border-top: 2px solid #1a4731 !important;
+}
+
+.mb-card tbody tr.mb-bench-first td {
+  border-top-color: #1a4731 !important;
+}
+
+/* CUT golfer name strikethrough */
+.mb-card tbody tr.mb-cut-row .mb-col-name {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+/* ── Score colours ── */
+.mb-under { color: #0a5c2e; }
+.mb-over  { color: #a83228; }
+.mb-even  { color: #111; }
+.mb-grey  { color: #9ca8b6; }
+
+/* Bench overrides (lighter on dark bg) */
+.mb-card tbody tr.mb-bench .mb-under { color: #72d48e; }
+.mb-card tbody tr.mb-bench .mb-over  { color: #f4a29d; }
+.mb-card tbody tr.mb-bench .mb-even  { color: rgba(235, 230, 218, 0.8); }
+.mb-card tbody tr.mb-bench .mb-grey  { color: rgba(235, 230, 218, 0.4); }
+
+/* ── Eliminated section separator ── */
+.mb-elim-sep {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 14px 0;
+  background: #edeae2;
+}
+
+.mb-elim-sep-line  { flex: 1; height: 1px; background: rgba(26, 71, 49, 0.3); }
+.mb-elim-sep-label {
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #6b8a76;
+  white-space: nowrap;
+}
+
+/* ── Keep helpers used by draft/admin views ── */
 .you-badge {
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--primary);
-}
-
-.leaderboard-score-block {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.expand-icon {
-  font-size: 0.6rem;
-  color: var(--muted);
-  opacity: 0.7;
 }
 
 .leaderboard-detail {
@@ -1282,12 +1394,139 @@ button:disabled {
   font-size: 0.85rem;
 }
 
-.golfer-row.counting {
-  background: #f5f8fd;
+.golfer-row.counting { background: #f5f8fd; }
+.golfer-row.bench    { opacity: 0.6; }
+
+/* ==========================================================================
+   Analytics tab
+   ========================================================================== */
+
+.analytics-section {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-sm);
 }
 
-.golfer-row.bench {
-  opacity: 0.6;
+.analytics-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.analytics-section-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--primary);
+}
+
+.analytics-section-subtitle {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.analytics-unavailable {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #f8fafd;
+  border: 1px solid #edf1f6;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.dg-team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.dg-team-card {
+  background: #f8fafd;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dg-team-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dg-team-name {
+  font-weight: 800;
+  font-size: 0.9rem;
+  letter-spacing: -0.02em;
+}
+
+.dg-team-score {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.dg-golfer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.dg-golfer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dg-badges {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dg-badge {
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.dg-badge-cut {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.dg-badge-cut.yellow {
+  background: #fff9c4;
+  color: #a07020;
+}
+
+.dg-badge-cut.red {
+  background: #ffebee;
+  color: #a84534;
+}
+
+.dg-badge-top5 {
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 /* ==========================================================================

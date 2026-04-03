@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DraftBoard } from "@/components/draft-board";
+import { AnalyticsTab } from "@/components/analytics-tab";
 import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
 import { buildLeaderboard } from "@/lib/scoring";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAppState } from "@/lib/store";
 import { Golfer, Pool, TeamSelection } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+
+/** Auto-refresh interval while tournament is in progress (5 minutes) */
+const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,7 +34,7 @@ function formatLastSynced(isoString: string | null): string {
   return `Updated ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-type TabId = "picks" | "leaderboard" | "members" | "admin";
+type TabId = "picks" | "leaderboard" | "analytics" | "members" | "admin";
 
 // ---------------------------------------------------------------------------
 // Tab: My Picks
@@ -124,6 +128,164 @@ function PicksTab({
 }
 
 // ---------------------------------------------------------------------------
+// Masterboard — Augusta Masters-style card grid
+// ---------------------------------------------------------------------------
+
+type LbRow = ReturnType<typeof buildLeaderboard>[number];
+
+function mbScoreStr(score: number | null): string {
+  if (score === null || score === 0) return "E";
+  return score > 0 ? `+${score}` : `${score}`;
+}
+
+function mbScoreClass(score: number | null, eliminated?: boolean): string {
+  if (eliminated) return "mb-grey";
+  if (score === null || score === 0) return "mb-even";
+  return score < 0 ? "mb-under" : "mb-over";
+}
+
+function lastName(fullName: string): string {
+  const parts = fullName.trim().split(" ");
+  return parts[parts.length - 1].toUpperCase();
+}
+
+function MasterboardCard({
+  row,
+  rank,
+  isElim,
+  currentUserId,
+  isLocked,
+}: {
+  row: LbRow;
+  rank: string;
+  isElim: boolean;
+  currentUserId: string | null;
+  isLocked: boolean;
+}) {
+  const isYou = row.userId === currentUserId;
+  const canSeePicks = isLocked || isYou;
+
+  return (
+    <table className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
+      <colgroup>
+        <col className="mb-col-rank" />
+        <col className="mb-col-name" />
+        <col className="mb-col-score" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th className="mb-col-rank">{isElim ? "—" : rank}</th>
+          <th className="mb-col-name">
+            {row.teamName}
+            {isYou && <span style={{ color: "#b89a2e", marginLeft: 4, fontSize: "0.6rem" }}>★</span>}
+          </th>
+          <th className={`mb-col-score ${mbScoreClass(row.teamScore, isElim)}`}>
+            {isElim ? "OUT" : mbScoreStr(row.teamScore)}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {canSeePicks ? (
+          <>
+            {row.countingGolfers.map((g) => (
+              <tr key={g.id} className="mb-counting">
+                <td className="mb-col-rank" />
+                <td className="mb-col-name">{lastName(g.name)}</td>
+                <td className={`mb-col-score ${mbScoreClass(g.currentScoreToPar)}`}>
+                  {mbScoreStr(g.currentScoreToPar)}
+                </td>
+              </tr>
+            ))}
+            {row.benchGolfers.map((g, idx) => (
+              <tr
+                key={g.id}
+                className={`mb-bench${idx === 0 ? " mb-bench-first" : ""}${!g.madeCut ? " mb-cut-row" : ""}`}
+              >
+                <td className="mb-col-rank" />
+                <td className="mb-col-name">{lastName(g.name)}</td>
+                <td className={`mb-col-score ${g.madeCut ? mbScoreClass(g.currentScoreToPar) : "mb-grey"}`}>
+                  {g.madeCut ? mbScoreStr(g.currentScoreToPar) : "CUT"}
+                </td>
+              </tr>
+            ))}
+          </>
+        ) : (
+          <tr className="mb-counting">
+            <td colSpan={3} style={{ textAlign: "center", fontStyle: "italic", color: "#9ca8b6", fontSize: "0.7rem", padding: "10px" }}>
+              Picks revealed at lock
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function Masterboard({
+  leaderboard,
+  currentUserId,
+  isLocked,
+}: {
+  leaderboard: ReturnType<typeof buildLeaderboard>;
+  currentUserId: string | null;
+  isLocked: boolean;
+}) {
+  const activeRows = leaderboard.filter((r) => r.status !== "eliminated");
+  const eliminatedRows = leaderboard.filter((r) => r.status === "eliminated");
+
+  function rankOf(row: LbRow): string {
+    const myScore = row.teamScore ?? 999;
+    const betterCount = activeRows.filter((r) => (r.teamScore ?? 999) < myScore).length;
+    const rank = betterCount + 1;
+    const tied = activeRows.filter((r) => (r.teamScore ?? 999) === myScore).length > 1;
+    return tied ? `T${rank}` : `${rank}`;
+  }
+
+  return (
+    <div className="mb-shell">
+      <div className="mb-banner">
+        <span className="mb-banner-title">Leaders</span>
+      </div>
+
+      <div className="mb-grid">
+        {activeRows.map((row) => (
+          <MasterboardCard
+            key={row.entryId}
+            row={row}
+            rank={rankOf(row)}
+            isElim={false}
+            currentUserId={currentUserId}
+            isLocked={isLocked}
+          />
+        ))}
+      </div>
+
+      {eliminatedRows.length > 0 && (
+        <>
+          <div className="mb-elim-sep">
+            <span className="mb-elim-sep-line" />
+            <span className="mb-elim-sep-label">Eliminated</span>
+            <span className="mb-elim-sep-line" />
+          </div>
+          <div className="mb-grid">
+            {eliminatedRows.map((row) => (
+              <MasterboardCard
+                key={row.entryId}
+                row={row}
+                rank="—"
+                isElim={true}
+                currentUserId={currentUserId}
+                isLocked={isLocked}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tab: Leaderboard
 // ---------------------------------------------------------------------------
 
@@ -144,21 +306,12 @@ function LeaderboardTab({
   scoresLastSyncedAt: string | null;
   onScoresSynced: (ts: string) => void;
 }) {
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const { refreshGolfers } = useAppState();
 
-  function toggleRowExpanded(entryId: string) {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      next.has(entryId) ? next.delete(entryId) : next.add(entryId);
-      return next;
-    });
-  }
-
-  async function handleSyncScores() {
-    setIsSyncing(true);
+  const handleSyncScores = useCallback(async (silent = false) => {
+    if (!silent) setIsSyncing(true);
     setSyncMessage(null);
     try {
       const res = await fetch("/api/scores/sync", {
@@ -174,27 +327,36 @@ function LeaderboardTab({
         error?: string;
       };
       if (data.ok) {
-        setSyncMessage(`Synced ${data.updated ?? 0} scores from "${data.eventName}".`);
+        if (!silent) setSyncMessage(`Synced ${data.updated ?? 0} scores from "${data.eventName}".`);
         await refreshGolfers(tournamentId);
         onScoresSynced(new Date().toISOString());
       } else {
-        setSyncMessage(`Sync failed: ${data.error ?? "Unknown error"}`);
+        if (!silent) setSyncMessage(`Sync failed: ${data.error ?? "Unknown error"}`);
       }
     } catch {
-      setSyncMessage("Sync failed — check your connection.");
+      if (!silent) setSyncMessage("Sync failed — check your connection.");
     } finally {
-      setIsSyncing(false);
+      if (!silent) setIsSyncing(false);
     }
-  }
+  }, [tournamentId, refreshGolfers, onScoresSynced]);
+
+  // Auto-refresh every 5 minutes when tournament is live
+  useEffect(() => {
+    if (!isLocked) return;
+    const timer = setInterval(() => {
+      void handleSyncScores(true);
+    }, AUTO_SYNC_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [isLocked, handleSyncScores]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-      {/* Sync controls */}
+      {/* Manual sync controls */}
       {isMember && isLocked && (
-        <div className="sync-controls" style={{ marginBottom: 12 }}>
+        <div className="sync-controls" style={{ marginBottom: 16 }}>
           <button
             className="secondary-button small-button"
-            onClick={handleSyncScores}
+            onClick={() => handleSyncScores(false)}
             disabled={isSyncing}
             type="button"
           >
@@ -217,81 +379,11 @@ function LeaderboardTab({
           <p className="muted small">The leaderboard populates once members submit their picks.</p>
         </div>
       ) : (
-        <div className="leaderboard">
-          {leaderboard.map((row, index) => {
-            const isExpanded = expandedRows.has(row.entryId);
-            const isEliminated = row.status === "eliminated";
-            const isCurrentUser = currentUserId === row.userId;
-            const canSeePicks = isLocked || isCurrentUser;
-
-            return (
-              <div className="leaderboard-row" key={row.entryId}>
-                <button
-                  className="leaderboard-row-main"
-                  onClick={() => toggleRowExpanded(row.entryId)}
-                  type="button"
-                  aria-expanded={isExpanded}
-                >
-                  <div className="leaderboard-rank-block">
-                    <span className="leaderboard-rank">
-                      {isEliminated ? "—" : `#${index + 1}`}
-                    </span>
-                    <span className="leaderboard-name">
-                      {row.teamName}
-                      {isCurrentUser && <span className="you-badge"> (you)</span>}
-                    </span>
-                  </div>
-                  <div className="leaderboard-score-block">
-                    {isEliminated ? (
-                      <span className="status-pill eliminated">Out</span>
-                    ) : (
-                      <span className={scoreBadgeClass(row.teamScore ?? 0)}>
-                        {row.teamScore === null ? "E" : scoreLabel(row.teamScore)}
-                      </span>
-                    )}
-                    <span className="expand-icon">{isExpanded ? "▲" : "▼"}</span>
-                  </div>
-                </button>
-
-                {isExpanded && (
-                  <div className="leaderboard-detail">
-                    {canSeePicks ? (
-                      <div className="golfer-list">
-                        {row.countingGolfers.map((g) => (
-                          <div className="golfer-row counting" key={g.id}>
-                            <span style={{ fontWeight: 600 }}>{g.name}</span>
-                            <span className={g.currentScoreToPar < 0 ? "negative-score" : ""}>
-                              {scoreLabel(g.currentScoreToPar)}
-                            </span>
-                            <span className="muted small">{g.position}</span>
-                          </div>
-                        ))}
-                        {row.benchGolfers.map((g) => (
-                          <div className="golfer-row bench" key={g.id}>
-                            <span className="muted">{g.name}</span>
-                            <span className="muted">
-                              {g.madeCut ? scoreLabel(g.currentScoreToPar) : "CUT"}
-                            </span>
-                            <span className="muted small">bench</span>
-                          </div>
-                        ))}
-                        {isEliminated && (
-                          <p className="muted small" style={{ marginTop: 6 }}>
-                            Fewer than 4 golfers made the cut — this team is out.
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="muted small">
-                        Picks are revealed when the tournament starts.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <Masterboard
+          leaderboard={leaderboard}
+          currentUserId={currentUserId}
+          isLocked={isLocked}
+        />
       )}
     </div>
   );
@@ -703,9 +795,16 @@ export function PoolPage({ poolId }: { poolId: string }) {
   }
 
   // Which tabs to show
+  const submittedEntries = state.entries.filter(
+    (e) => e.poolId === poolId && e.submittedAt !== null,
+  );
+
   const tabs: { id: TabId; label: string; badge?: number }[] = [
     { id: "picks", label: "My Picks" },
     { id: "leaderboard", label: "Leaderboard", badge: leaderboard.length || undefined },
+    ...(submittedEntries.length > 0
+      ? [{ id: "analytics" as TabId, label: "Analytics" }]
+      : []),
     { id: "members", label: "Members", badge: memberUsers.length || undefined },
     ...(isAdmin ? [{ id: "admin" as TabId, label: "⚙ Admin" }] : []),
   ];
@@ -806,6 +905,16 @@ export function PoolPage({ poolId }: { poolId: string }) {
             tournamentId={currentTournament.id}
             scoresLastSyncedAt={localSyncedAt ?? state.scoresLastSyncedAt}
             onScoresSynced={setLocalSyncedAt}
+          />
+        )}
+
+        {activeTab === "analytics" && (
+          <AnalyticsTab
+            leaderboard={leaderboard}
+            entries={state.entries}
+            pool={currentPool}
+            golferMap={golferMap}
+            users={state.users}
           />
         )}
 
