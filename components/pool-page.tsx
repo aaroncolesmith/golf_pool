@@ -163,52 +163,58 @@ function MasterboardCard({
   const canSeePicks = isLocked || isYou;
 
   return (
-    <div className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
-      {/* Card header */}
-      <div className="mb-card-hdr">
-        <span className="mb-card-rank">{isElim ? "—" : rank}</span>
-        <span className="mb-card-name">
-          {row.teamName}
-          {isYou && <span className="mb-card-you">★</span>}
-        </span>
-        <span className={`mb-card-tot ${mbScoreClass(row.teamScore, isElim)}`}>
-          {isElim ? "OUT" : mbScoreStr(row.teamScore)}
-        </span>
-      </div>
-
-      {canSeePicks ? (
-        <>
-          {/* Counting golfer rows */}
-          {row.countingGolfers.map((g) => (
-            <div key={g.id} className="mb-row mb-row--counting">
-              <span className="mb-row-indent" />
-              <span className="mb-row-name">{lastName(g.name)}</span>
-              <span className={`mb-row-score ${mbScoreClass(g.currentScoreToPar)}`}>
-                {mbScoreStr(g.currentScoreToPar)}
-              </span>
-            </div>
-          ))}
-
-          {/* Bench golfer rows */}
-          {row.benchGolfers.map((g) => (
-            <div
-              key={g.id}
-              className={`mb-row mb-row--bench${!g.madeCut ? " mb-row--cut" : ""}`}
-            >
-              <span className="mb-row-indent" />
-              <span className="mb-row-name">{lastName(g.name)}</span>
-              <span className={`mb-row-score ${mbScoreClass(g.madeCut ? g.currentScoreToPar : null)}`}>
-                {g.madeCut ? mbScoreStr(g.currentScoreToPar) : "CUT"}
-              </span>
-            </div>
-          ))}
-        </>
-      ) : (
-        <div className="mb-row mb-row--hidden">
-          <span className="mb-hidden-msg">Picks revealed at lock</span>
-        </div>
-      )}
-    </div>
+    <table className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
+      <colgroup>
+        <col className="mb-col-rank" />
+        <col className="mb-col-name" />
+        <col className="mb-col-score" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th className="mb-col-rank">{isElim ? "—" : rank}</th>
+          <th className="mb-col-name">
+            {row.teamName}
+            {isYou && <span style={{ color: "#b89a2e", marginLeft: 4, fontSize: "0.6rem" }}>★</span>}
+          </th>
+          <th className={`mb-col-score ${mbScoreClass(row.teamScore, isElim)}`}>
+            {isElim ? "OUT" : mbScoreStr(row.teamScore)}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {canSeePicks ? (
+          <>
+            {row.countingGolfers.map((g) => (
+              <tr key={g.id} className="mb-counting">
+                <td className="mb-col-rank" />
+                <td className="mb-col-name">{lastName(g.name)}</td>
+                <td className={`mb-col-score ${mbScoreClass(g.currentScoreToPar)}`}>
+                  {mbScoreStr(g.currentScoreToPar)}
+                </td>
+              </tr>
+            ))}
+            {row.benchGolfers.map((g, idx) => (
+              <tr
+                key={g.id}
+                className={`mb-bench${idx === 0 ? " mb-bench-first" : ""}${!g.madeCut ? " mb-cut-row" : ""}`}
+              >
+                <td className="mb-col-rank" />
+                <td className="mb-col-name">{lastName(g.name)}</td>
+                <td className={`mb-col-score ${g.madeCut ? mbScoreClass(g.currentScoreToPar) : "mb-grey"}`}>
+                  {g.madeCut ? mbScoreStr(g.currentScoreToPar) : "CUT"}
+                </td>
+              </tr>
+            ))}
+          </>
+        ) : (
+          <tr className="mb-counting">
+            <td colSpan={3} style={{ textAlign: "center", fontStyle: "italic", color: "#9ca8b6", fontSize: "0.7rem", padding: "10px" }}>
+              Picks revealed at lock
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
   );
 }
 
