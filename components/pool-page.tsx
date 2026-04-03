@@ -341,9 +341,10 @@ function LeaderboardTab({
     }
   }, [tournamentId, refreshGolfers, onScoresSynced]);
 
-  // Auto-refresh every 5 minutes when tournament is live
+  // Sync on mount + every 5 minutes when tournament is live
   useEffect(() => {
     if (!isLocked) return;
+    void handleSyncScores(true);
     const timer = setInterval(() => {
       void handleSyncScores(true);
     }, AUTO_SYNC_INTERVAL_MS);
