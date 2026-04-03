@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DraftBoard } from "@/components/draft-board";
+import { AnalyticsTab } from "@/components/analytics-tab";
 import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
 import { buildLeaderboard } from "@/lib/scoring";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAppState } from "@/lib/store";
 import { Golfer, Pool, TeamSelection } from "@/lib/types";
-import { AnalyticsTab } from "@/components/analytics-tab";
 import { formatDate } from "@/lib/utils";
+
+/** Auto-refresh interval while tournament is in progress (5 minutes) */
+const AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -136,7 +139,7 @@ function mbScoreStr(score: number | null): string {
 }
 
 function mbScoreClass(score: number | null, eliminated?: boolean): string {
-  if (eliminated) return "mb-cut";
+  if (eliminated) return "mb-grey";
   if (score === null || score === 0) return "mb-even";
   return score < 0 ? "mb-under" : "mb-over";
 }
@@ -240,12 +243,11 @@ function Masterboard({
 
   return (
     <div className="mb-shell">
-      {/* Arch banner */}
       <div className="mb-banner">
-        <span className="mb-banner-title">LEADERS</span>
+        <span className="mb-banner-title">Leaders</span>
       </div>
 
-      {/* Active team cards */}
+
       <div className="mb-grid">
         {activeRows.map((row) => (
           <MasterboardCard
@@ -259,7 +261,6 @@ function Masterboard({
         ))}
       </div>
 
-      {/* Eliminated separator + cards */}
       {eliminatedRows.length > 0 && (
         <>
           <div className="mb-elim-sep">
@@ -310,8 +311,8 @@ function LeaderboardTab({
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const { refreshGolfers } = useAppState();
 
-  async function handleSyncScores() {
-    setIsSyncing(true);
+  const handleSyncScores = useCallback(async (silent = false) => {
+    if (!silent) setIsSyncing(true);
     setSyncMessage(null);
     try {
       const res = await fetch("/api/scores/sync", {
@@ -327,27 +328,36 @@ function LeaderboardTab({
         error?: string;
       };
       if (data.ok) {
-        setSyncMessage(`Synced ${data.updated ?? 0} scores from "${data.eventName}".`);
+        if (!silent) setSyncMessage(`Synced ${data.updated ?? 0} scores from "${data.eventName}".`);
         await refreshGolfers(tournamentId);
         onScoresSynced(new Date().toISOString());
       } else {
-        setSyncMessage(`Sync failed: ${data.error ?? "Unknown error"}`);
+        if (!silent) setSyncMessage(`Sync failed: ${data.error ?? "Unknown error"}`);
       }
     } catch {
-      setSyncMessage("Sync failed — check your connection.");
+      if (!silent) setSyncMessage("Sync failed — check your connection.");
     } finally {
-      setIsSyncing(false);
+      if (!silent) setIsSyncing(false);
     }
-  }
+  }, [tournamentId, refreshGolfers, onScoresSynced]);
+
+  // Auto-refresh every 5 minutes when tournament is live
+  useEffect(() => {
+    if (!isLocked) return;
+    const timer = setInterval(() => {
+      void handleSyncScores(true);
+    }, AUTO_SYNC_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [isLocked, handleSyncScores]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-      {/* Sync controls */}
+      {/* Manual sync controls */}
       {isMember && isLocked && (
         <div className="sync-controls" style={{ marginBottom: 16 }}>
           <button
             className="secondary-button small-button"
-            onClick={handleSyncScores}
+            onClick={() => handleSyncScores(false)}
             disabled={isSyncing}
             type="button"
           >

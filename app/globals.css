@@ -51,6 +51,8 @@ body {
   background: #ffffff;
   /* Reserve space for bottom nav on mobile */
   padding-bottom: env(safe-area-inset-bottom);
+  /* Prevent horizontal overflow across all pages */
+  overflow-x: hidden;
 }
 
 a {
@@ -1189,23 +1191,23 @@ button:disabled {
 /* ── Outer arch shell ── */
 .mb-shell {
   border: 3px solid #1a4731;
-  border-radius: 50% 50% 0 0 / 60px 60px 0 0;
+  border-radius: 28px 28px 0 0;
   overflow: hidden;
   background: #edeae2;
   box-shadow: 0 8px 40px rgba(26, 71, 49, 0.2);
 }
 
-/* ── Arch banner: cream bg, large dark serif text ── */
+/* ── Banner: cream bg, large dark serif text ── */
 .mb-banner {
   background: #edeae2;
-  padding: 56px 20px 20px;
+  padding: 22px 20px 16px;
   text-align: center;
   border-bottom: 3px solid #1a4731;
 }
 
 .mb-banner-title {
   font-family: 'Georgia', 'Times New Roman', serif;
-  font-size: clamp(1.5rem, 4vw, 2.2rem);
+  font-size: clamp(1.3rem, 4vw, 2rem);
   font-weight: 900;
   letter-spacing: 0.3em;
   text-transform: uppercase;
@@ -1276,7 +1278,7 @@ button:disabled {
   overflow: hidden;
 }
 
-/* Rank cell — empty in golfer rows */
+/* Rank cell */
 .mb-card tbody .mb-col-rank {
   text-align: center;
 }
@@ -1365,7 +1367,7 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* Keep old leaderboard classes for non-scoreboard uses */
+/* ── Keep helpers used by draft/admin views ── */
 .you-badge {
   font-size: 0.75rem;
   font-weight: 700;
@@ -1394,6 +1396,138 @@ button:disabled {
 
 .golfer-row.counting { background: #f5f8fd; }
 .golfer-row.bench    { opacity: 0.6; }
+
+/* ==========================================================================
+   Analytics tab
+   ========================================================================== */
+
+.analytics-section {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.analytics-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.analytics-section-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--primary);
+}
+
+.analytics-section-subtitle {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.analytics-unavailable {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #f8fafd;
+  border: 1px solid #edf1f6;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.dg-team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.dg-team-card {
+  background: #f8fafd;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dg-team-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dg-team-name {
+  font-weight: 800;
+  font-size: 0.9rem;
+  letter-spacing: -0.02em;
+}
+
+.dg-team-score {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.dg-golfer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.dg-golfer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dg-badges {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dg-badge {
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.dg-badge-cut {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.dg-badge-cut.yellow {
+  background: #fff9c4;
+  color: #a07020;
+}
+
+.dg-badge-cut.red {
+  background: #ffebee;
+  color: #a84534;
+}
+
+.dg-badge-top5 {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
 
 /* ==========================================================================
    Sync controls

@@ -45,10 +45,10 @@ function teamScoreColor(score: number | null, status: string): string {
   return "#7a2020";
 }
 
-function cutPctBg(pct: number): string {
-  if (pct >= 0.7) return "#c8e6c9";
-  if (pct >= 0.4) return "#fff9c4";
-  return "#ffcdd2";
+function cutBadgeClass(pct: number): string {
+  if (pct >= 0.7) return "dg-badge dg-badge-cut";
+  if (pct >= 0.4) return "dg-badge dg-badge-cut yellow";
+  return "dg-badge dg-badge-cut red";
 }
 
 function normalizeName(name: string): string {
@@ -60,6 +60,14 @@ function normalizeName(name: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+
+function scoreStr(score: number | null, eliminated?: boolean): string {
+  if (eliminated) return "Out";
+  if (score === null || score === 0) return "E";
+  return score > 0 ? `+${score}` : `${score}`;
+}
+
 
 // ---------------------------------------------------------------------------
 // Custom scatter dot — renders circle + label in one <g>
@@ -82,18 +90,18 @@ function TeamDot(props: {
       <circle
         cx={cx}
         cy={cy}
-        r={8}
+        r={9}
         fill={fill}
         stroke="white"
-        strokeWidth={1.5}
+        strokeWidth={2}
         style={{ cursor: "default" }}
       />
       <text
         x={cx}
-        y={cy - 13}
+        y={cy - 14}
         textAnchor="middle"
         fontSize={11}
-        fontWeight={600}
+        fontWeight={700}
         fill="#15202b"
         style={{ pointerEvents: "none", userSelect: "none" }}
       >
@@ -111,7 +119,6 @@ function GolferDot(props: {
   const { cx = 0, cy = 0, payload } = props;
   if (!payload) return null;
   const fill = payload.madeCut ? "#0f8f5f" : "#9ca8b6";
-  // Show last name only to save space; full name appears in tooltip
   const parts = payload.name.split(" ");
   const label = parts[parts.length - 1];
   return (
@@ -119,17 +126,18 @@ function GolferDot(props: {
       <circle
         cx={cx}
         cy={cy}
-        r={6}
+        r={7}
         fill={fill}
         stroke="white"
-        strokeWidth={1.5}
+        strokeWidth={2}
         style={{ cursor: "default" }}
       />
       <text
         x={cx}
-        y={cy - 10}
+        y={cy - 12}
         textAnchor="middle"
         fontSize={10}
+        fontWeight={600}
         fill="#15202b"
         style={{ pointerEvents: "none", userSelect: "none" }}
       >
@@ -143,7 +151,7 @@ function GolferDot(props: {
 // Tooltip content
 // ---------------------------------------------------------------------------
 
-function TeamTooltipContent({
+function TeamTooltip({
   active,
   payload,
 }: {
@@ -152,36 +160,26 @@ function TeamTooltipContent({
 }) {
   if (!active || !payload?.[0]?.payload) return null;
   const p = payload[0].payload;
-  const scoreStr =
-    p.status === "eliminated"
-      ? "Out"
-      : p.teamScore === null
-        ? "E"
-        : p.teamScore === 0
-          ? "E"
-          : p.teamScore > 0
-            ? `+${p.teamScore}`
-            : `${p.teamScore}`;
   return (
     <div
       style={{
         background: "white",
         border: "1px solid rgba(21,32,43,0.12)",
-        borderRadius: 8,
-        padding: "8px 12px",
+        borderRadius: 10,
+        padding: "10px 14px",
         fontSize: 12,
         boxShadow: "0 4px 16px rgba(23,49,83,0.1)",
         maxWidth: 200,
       }}
     >
-      <p style={{ fontWeight: 700, marginBottom: 4 }}>
+      <p style={{ fontWeight: 800, marginBottom: 6, fontSize: 13 }}>
         {p.teamName}
-        <span style={{ fontWeight: 400, marginLeft: 6, color: "#667487" }}>
-          {scoreStr}
+        <span style={{ fontWeight: 500, marginLeft: 8, color: "#667487" }}>
+          {scoreStr(p.teamScore, p.status === "eliminated")}
         </span>
       </p>
       {p.picks.map((name, i) => (
-        <p key={i} style={{ color: "#667487", marginBottom: 1 }}>
+        <p key={i} style={{ color: "#667487", marginBottom: 2 }}>
           {name}
         </p>
       ))}
@@ -189,7 +187,7 @@ function TeamTooltipContent({
   );
 }
 
-function GolferTooltipContent({
+function GolferTooltip({
   active,
   payload,
 }: {
@@ -198,39 +196,32 @@ function GolferTooltipContent({
 }) {
   if (!active || !payload?.[0]?.payload) return null;
   const p = payload[0].payload;
-  const scoreStr =
-    p.scoreToPar === 0
-      ? "E"
-      : p.scoreToPar > 0
-        ? `+${p.scoreToPar}`
-        : `${p.scoreToPar}`;
   return (
     <div
       style={{
         background: "white",
         border: "1px solid rgba(21,32,43,0.12)",
-        borderRadius: 8,
-        padding: "8px 12px",
+        borderRadius: 10,
+        padding: "10px 14px",
         fontSize: 12,
         boxShadow: "0 4px 16px rgba(23,49,83,0.1)",
         maxWidth: 200,
       }}
     >
-      <p style={{ fontWeight: 700, marginBottom: 4 }}>
+      <p style={{ fontWeight: 800, marginBottom: 4, fontSize: 13 }}>
         {p.name}
-        <span style={{ fontWeight: 400, marginLeft: 6, color: "#667487" }}>
-          {scoreStr} · {p.position}
+        <span style={{ fontWeight: 500, marginLeft: 8, color: "#667487" }}>
+          {scoreStr(p.scoreToPar)} · {p.position}
         </span>
       </p>
-      <p style={{ color: "#667487", marginBottom: 1 }}>
-        {p.ownership} team{p.ownership !== 1 ? "s" : ""} (
-        {Math.round(p.ownershipPct * 100)}%)
+      <p style={{ color: "#667487", marginBottom: 2 }}>
+        {p.ownership} team{p.ownership !== 1 ? "s" : ""} ({Math.round(p.ownershipPct * 100)}%)
       </p>
-      <p style={{ color: "#667487", fontSize: 11, marginTop: 4 }}>
+      <p style={{ color: "#667487", fontSize: 11 }}>
         {p.pickedByTeams.join(", ")}
       </p>
       {!p.madeCut && (
-        <p style={{ color: "#a84534", marginTop: 4, fontWeight: 600 }}>
+        <p style={{ color: "#a84534", marginTop: 4, fontWeight: 700 }}>
           {p.position}
         </p>
       )}
@@ -239,7 +230,7 @@ function GolferTooltipContent({
 }
 
 // ---------------------------------------------------------------------------
-// Section wrapper
+// Section wrapper — uses analytics CSS classes
 // ---------------------------------------------------------------------------
 
 function Section({
@@ -252,23 +243,10 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div>
-        <p
-          style={{
-            fontSize: "0.72rem",
-            fontWeight: 800,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            color: "#667487",
-            marginBottom: 2,
-          }}
-        >
-          {title}
-        </p>
-        {subtitle && (
-          <p style={{ fontSize: "0.82rem", color: "#667487" }}>{subtitle}</p>
-        )}
+    <div className="analytics-section">
+      <div className="analytics-section-header">
+        <p className="analytics-section-title">{title}</p>
+        {subtitle && <p className="analytics-section-subtitle">{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -276,49 +254,29 @@ function Section({
 }
 
 // ---------------------------------------------------------------------------
-// 1. Pick Similarity
+// 1. Pick Similarity scatter
 // ---------------------------------------------------------------------------
 
-function PickSimilarityChart({
-  data,
-}: {
-  data: SimilarityPoint[];
-}) {
+function PickSimilarityChart({ data }: { data: SimilarityPoint[] }) {
   if (data.length < 2) {
     return (
-      <div className="empty-state" style={{ padding: "24px 0" }}>
-        <p className="muted small">Need at least 2 submitted teams.</p>
+      <div className="analytics-unavailable">
+        <span>📊</span>
+        <span>Need at least 2 submitted teams to compute similarity.</span>
       </div>
     );
   }
 
   return (
-    <div style={{ width: "100%", height: 340 }}>
+    <div style={{ width: "100%", height: 320 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <ScatterChart margin={{ top: 30, right: 20, bottom: 20, left: 20 }}>
-          <XAxis
-            type="number"
-            dataKey="x"
-            hide
-            domain={["auto", "auto"]}
-          />
-          <YAxis
-            type="number"
-            dataKey="y"
-            hide
-            domain={["auto", "auto"]}
-          />
-          <ReferenceLine x={0} stroke="rgba(21,32,43,0.08)" />
-          <ReferenceLine y={0} stroke="rgba(21,32,43,0.08)" />
-          <Tooltip
-            content={<TeamTooltipContent />}
-            cursor={false}
-          />
-          <Scatter
-            data={data}
-            shape={<TeamDot />}
-            isAnimationActive={false}
-          />
+        <ScatterChart margin={{ top: 32, right: 20, bottom: 20, left: 20 }}>
+          <XAxis type="number" dataKey="x" hide domain={["auto", "auto"]} />
+          <YAxis type="number" dataKey="y" hide domain={["auto", "auto"]} />
+          <ReferenceLine x={0} stroke="rgba(21,32,43,0.07)" />
+          <ReferenceLine y={0} stroke="rgba(21,32,43,0.07)" />
+          <Tooltip content={<TeamTooltip />} cursor={false} />
+          <Scatter data={data} shape={<TeamDot />} isAnimationActive={false} />
         </ScatterChart>
       </ResponsiveContainer>
     </div>
@@ -340,7 +298,6 @@ function DataGolfSection({
   dgData: DataGolfGolfer[] | null;
   dgLoading: boolean;
 }) {
-  // Build lookup: normalized name → DataGolf golfer
   const dgLookup = useMemo(() => {
     if (!dgData) return new Map<string, DataGolfGolfer>();
     return new Map(dgData.map((g) => [normalizeName(g.name), g]));
@@ -349,7 +306,6 @@ function DataGolfSection({
   function findDg(name: string): DataGolfGolfer | undefined {
     const norm = normalizeName(name);
     if (dgLookup.has(norm)) return dgLookup.get(norm);
-    // Last-name fallback
     const lastName = norm.split(" ").at(-1) ?? "";
     for (const [key, val] of dgLookup) {
       if (key.endsWith(` ${lastName}`) || key === lastName) return val;
@@ -359,25 +315,30 @@ function DataGolfSection({
 
   if (dgLoading) {
     return (
-      <p className="muted small" style={{ padding: "12px 0" }}>
-        Loading DataGolf probabilities…
-      </p>
+      <div className="analytics-unavailable">
+        <span
+          style={{
+            display: "inline-block",
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            border: "2px solid var(--primary)",
+            borderTopColor: "transparent",
+            animation: "spin 0.7s linear infinite",
+          }}
+        />
+        <span>Loading DataGolf probabilities…</span>
+      </div>
     );
   }
 
   if (!dgData) {
     return (
-      <div
-        style={{
-          padding: "14px 16px",
-          background: "rgba(21,32,43,0.04)",
-          borderRadius: 10,
-          fontSize: "0.82rem",
-          color: "#667487",
-        }}
-      >
-        DataGolf live model unavailable. Data is only accessible during active
-        tournament rounds.
+      <div className="analytics-unavailable">
+        <span>🔌</span>
+        <span>
+          DataGolf live model is only available during active tournament rounds.
+        </span>
       </div>
     );
   }
@@ -385,13 +346,7 @@ function DataGolfSection({
   const rows = leaderboard.filter((r) => r.status !== "eliminated");
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-        gap: 10,
-      }}
-    >
+    <div className="dg-team-grid">
       {rows.map((row) => {
         const allGolfers = [...row.countingGolfers, ...row.benchGolfers];
         const dgGolfers = allGolfers.map((g) => ({
@@ -403,42 +358,15 @@ function DataGolfSection({
           dgGolfers.reduce((s, { dg }) => s + (dg?.cut ?? 0), 0) /
           Math.max(dgGolfers.length, 1);
 
-        const scoreStr =
-          row.teamScore === null
-            ? "E"
-            : row.teamScore === 0
-              ? "E"
-              : row.teamScore > 0
-                ? `+${row.teamScore}`
-                : `${row.teamScore}`;
-
         return (
-          <div
-            key={row.entryId}
-            style={{
-              background: "white",
-              border: "1px solid rgba(21,32,43,0.1)",
-              borderRadius: 10,
-              padding: "10px 12px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <span style={{ fontWeight: 700, fontSize: "0.88rem" }}>
-                {row.teamName}
-              </span>
-              <span style={{ fontSize: "0.8rem", color: "#667487" }}>
-                {scoreStr} · avg cut{" "}
-                <strong
+          <div key={row.entryId} className="dg-team-card">
+            <div className="dg-team-header">
+              <span className="dg-team-name">{row.teamName}</span>
+              <span className="dg-team-score">
+                {scoreStr(row.teamScore)}{" "}
+                <span
                   style={{
+                    fontWeight: 700,
                     color:
                       avgCut >= 0.7
                         ? "#0f8f5f"
@@ -447,8 +375,8 @@ function DataGolfSection({
                           : "#a84534",
                   }}
                 >
-                  {Math.round(avgCut * 100)}%
-                </strong>
+                  • avg {Math.round(avgCut * 100)}% cut
+                </span>
               </span>
             </div>
 
@@ -457,59 +385,28 @@ function DataGolfSection({
               return (
                 <div
                   key={golfer.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    opacity: isBench ? 0.6 : 1,
-                    fontSize: "0.8rem",
-                  }}
+                  className="dg-golfer-row"
+                  style={{ opacity: isBench ? 0.6 : 1 }}
                 >
                   <span
+                    className="dg-golfer-name"
                     style={{
-                      flex: 1,
-                      minWidth: 0,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
                       fontWeight: isBench ? 400 : 600,
                       color: !golfer.madeCut ? "#9ca8b6" : "inherit",
+                      textDecoration: !golfer.madeCut ? "line-through" : "none",
                     }}
                   >
                     {golfer.name}
-                    {!golfer.madeCut && (
-                      <span
-                        style={{ marginLeft: 4, color: "#9ca8b6", fontWeight: 400 }}
-                      >
-                        {golfer.position}
-                      </span>
-                    )}
                   </span>
                   {dg ? (
-                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                    <div className="dg-badges">
                       <span
-                        style={{
-                          padding: "1px 5px",
-                          borderRadius: 4,
-                          background: cutPctBg(dg.cut),
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                        }}
+                        className={cutBadgeClass(dg.cut)}
                         title="Make cut %"
                       >
                         {Math.round(dg.cut * 100)}%
                       </span>
-                      <span
-                        style={{
-                          padding: "1px 5px",
-                          borderRadius: 4,
-                          background: "rgba(28,110,231,0.08)",
-                          color: "#1c6ee7",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                        }}
-                        title="Top 5 %"
-                      >
+                      <span className="dg-badge dg-badge-top5" title="Top 5 %">
                         T5: {Math.round(dg.top5 * 100)}%
                       </span>
                     </div>
@@ -533,8 +430,9 @@ function DataGolfSection({
 function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
   if (data.length === 0) {
     return (
-      <div className="empty-state" style={{ padding: "24px 0" }}>
-        <p className="muted small">No submitted picks yet.</p>
+      <div className="analytics-unavailable">
+        <span>⛳</span>
+        <span>No submitted picks yet.</span>
       </div>
     );
   }
@@ -544,24 +442,22 @@ function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
   const minScore = Math.min(...scores);
   const maxScore = Math.max(...scores);
 
-  // Color legend entries
   const anyMadeCut = data.some((d) => d.madeCut);
   const anyMissed = data.some((d) => !d.madeCut);
 
   return (
     <div>
-      {/* Legend */}
       <div
         style={{
           display: "flex",
-          gap: 12,
-          marginBottom: 8,
+          gap: 16,
+          marginBottom: 10,
           fontSize: "0.78rem",
           color: "#667487",
         }}
       >
         {anyMadeCut && (
-          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span
               style={{
                 display: "inline-block",
@@ -575,7 +471,7 @@ function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
           </span>
         )}
         {anyMissed && (
-          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span
               style={{
                 display: "inline-block",
@@ -592,7 +488,7 @@ function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
 
       <div style={{ width: "100%", height: 360 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ScatterChart margin={{ top: 24, right: 20, bottom: 32, left: 40 }}>
+          <ScatterChart margin={{ top: 24, right: 20, bottom: 36, left: 44 }}>
             <XAxis
               type="number"
               dataKey="ownership"
@@ -602,7 +498,7 @@ function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
               label={{
                 value: "Teams with this pick",
                 position: "insideBottom",
-                offset: -14,
+                offset: -18,
                 fontSize: 11,
                 fill: "#667487",
               }}
@@ -611,10 +507,7 @@ function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
               type="number"
               dataKey="scoreToPar"
               reversed
-              domain={[
-                Math.floor(minScore) - 1,
-                Math.ceil(maxScore) + 1,
-              ]}
+              domain={[Math.floor(minScore) - 1, Math.ceil(maxScore) + 1]}
               tick={{ fontSize: 11, fill: "#667487" }}
               tickFormatter={(v: number) =>
                 v === 0 ? "E" : v > 0 ? `+${v}` : `${v}`
@@ -623,16 +516,17 @@ function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
                 value: "Score to par",
                 angle: -90,
                 position: "insideLeft",
-                offset: -24,
+                offset: -28,
                 fontSize: 11,
                 fill: "#667487",
               }}
             />
-            <ReferenceLine y={0} stroke="rgba(21,32,43,0.12)" strokeDasharray="3 3" />
-            <Tooltip
-              content={<GolferTooltipContent />}
-              cursor={false}
+            <ReferenceLine
+              y={0}
+              stroke="rgba(21,32,43,0.1)"
+              strokeDasharray="4 4"
             />
+            <Tooltip content={<GolferTooltip />} cursor={false} />
             <Scatter
               data={data}
               shape={<GolferDot />}
@@ -646,7 +540,7 @@ function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Main AnalyticsTab
+// Main export
 // ---------------------------------------------------------------------------
 
 export function AnalyticsTab({
@@ -702,19 +596,19 @@ export function AnalyticsTab({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
-      {/* 1. Pick Similarity */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
       <Section
         title="Pick Similarity"
-        subtitle="Teams closer together made similar picks. Color shows current score (green = lower is better)."
+        subtitle="Teams plotted by how similar their picks are. Color shows current score — darker green is better."
       >
         <PickSimilarityChart data={similarityData} />
       </Section>
 
-      {/* 2. DataGolf Survival Probabilities */}
       <Section
         title="DataGolf Probabilities"
-        subtitle="Cut %, Top 5 %, and Win % from DataGolf's live model. Badge color: green ≥ 70%, yellow 40–70%, red < 40%."
+        subtitle="Cut %, Top 5 %, and Win % from DataGolf's live model. Only available during active tournament rounds."
       >
         <DataGolfSection
           leaderboard={leaderboard}
@@ -724,10 +618,9 @@ export function AnalyticsTab({
         />
       </Section>
 
-      {/* 3. Ownership × Performance */}
       <Section
         title="Ownership vs. Score"
-        subtitle="X-axis: how many teams picked each golfer. Y-axis: current score (lower = better = higher on chart)."
+        subtitle="X-axis: how many teams picked each golfer. Y-axis: score to par (lower = better = higher on chart)."
       >
         <OwnershipChart data={ownershipData} />
       </Section>
