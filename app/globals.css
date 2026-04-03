@@ -1183,83 +1183,255 @@ button:disabled {
 }
 
 /* ==========================================================================
-   Leaderboard
+   Scoreboard — Augusta-inspired tournament board
    ========================================================================== */
 
-.leaderboard {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+.sb {
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1.5px solid #1a4731;
+  box-shadow: 0 6px 32px rgba(26, 71, 49, 0.16);
 }
 
-.leaderboard-row {
-  border-bottom: 1px solid #f3f5f8;
+/* Arch banner */
+.sb-banner {
+  background: #1a4731;
+  padding: 22px 20px 16px;
+  text-align: center;
+  border-radius: 52% 52% 0 0 / 26px 26px 0 0;
+  position: relative;
 }
 
-.leaderboard-row:last-child {
+.sb-banner-title {
+  font-size: clamp(1.3rem, 4vw, 1.75rem);
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #f0e8d0;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  display: block;
+}
+
+/* Column header bar */
+.sb-col-header {
+  display: grid;
+  grid-template-columns: 52px 1fr 70px 1fr;
+  gap: 8px;
+  background: #245c3c;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  align-items: center;
+}
+
+/* Row wrapper */
+.sb-row-wrap {
+  border-bottom: 1px solid #d0e9d8;
+}
+
+.sb-row-wrap:last-child {
   border-bottom: none;
 }
 
-.leaderboard-row-main {
+.sb-row-wrap--elim {
+  opacity: 0.45;
+}
+
+/* Main data row */
+.sb-row {
   width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: 52px 1fr 70px 1fr;
+  gap: 8px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 0;
+  padding: 11px 14px;
   border: none;
-  background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background 110ms ease;
 }
 
-.leaderboard-row-main:hover {
-  background: #fafcfe;
-}
+.sb-row-wrap:nth-child(odd) .sb-row   { background: #ffffff; }
+.sb-row-wrap:nth-child(even) .sb-row  { background: #f3fbf6; }
+.sb-row:hover                          { background: #e5f4eb !important; }
 
-.leaderboard-rank-block {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
+/* Column slots */
+.sb-col-pos     { text-align: center; flex-shrink: 0; }
+.sb-col-tot     { text-align: center; flex-shrink: 0; }
+.sb-col-golfers { min-width: 0; }
 
-.leaderboard-rank {
-  font-size: 0.78rem;
+/* Rank */
+.sb-rank {
+  font-size: 0.82rem;
   font-weight: 800;
-  color: var(--muted);
-  letter-spacing: 0.04em;
-  width: 28px;
-  flex-shrink: 0;
-  text-align: center;
+  color: #1a4731;
+  letter-spacing: 0.02em;
 }
 
-.leaderboard-name {
-  font-size: 0.95rem;
+/* Team name */
+.sb-team-name {
+  font-size: 0.9rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.sb-you {
+  color: #1a4731;
+  font-size: 0.72rem;
+  margin-left: 4px;
+}
+
+/* Total score */
+.sb-tot {
+  font-size: 1.15rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Score colours */
+.sb-under { color: #0a5c2e; }
+.sb-over  { color: #a83228; }
+.sb-even  { color: #15202b; }
+.sb-cut   { color: #9ca8b6; }
+
+/* Golfer chips */
+.sb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: flex-start;
+}
+
+.sb-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 7px 4px;
+  background: rgba(26, 71, 49, 0.06);
+  border: 1px solid rgba(26, 71, 49, 0.15);
+  border-radius: 5px;
+  min-width: 46px;
+}
+
+.sb-chip-name {
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #253a2e;
+  white-space: nowrap;
+}
+
+.sb-chip-score {
+  font-size: 0.74rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Eliminated teams separator */
+.sb-elim-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #d0e9d8;
+}
+
+.sb-elim-divider-line {
+  flex: 1;
+  height: 1px;
+  background: #c4d9cb;
+}
+
+.sb-elim-divider-label {
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #9ca8b6;
+  white-space: nowrap;
+}
+
+/* Bench sub-row */
+.sb-bench {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 14px 10px calc(52px + 8px + 14px);
+  background: #eef8f1;
+  border-top: 1px dashed #b8d9c2;
+}
+
+.sb-bench-label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #8aaa95;
+  flex-shrink: 0;
+}
+
+.sb-bench-golfer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.76rem;
+}
+
+.sb-bench-name {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #3d6b4f;
+}
+
+.sb-bench-score {
+  font-weight: 600;
+  color: #667487;
+  font-variant-numeric: tabular-nums;
+}
+
+.sb-bench-golfer--cut .sb-bench-name {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.sb-bench-golfer--cut .sb-bench-score {
+  color: #9ca8b6;
+}
+
+/* Mobile: stack golfer chips below team row */
+@media (max-width: 600px) {
+  .sb-col-header,
+  .sb-row {
+    grid-template-columns: 44px 1fr 62px;
+    grid-template-rows: auto auto;
+  }
+
+  .sb-col-golfers {
+    grid-column: 1 / -1;
+    padding-bottom: 4px;
+  }
+
+  .sb-bench {
+    padding-left: 14px;
+  }
+}
+
+/* Keep old leaderboard classes for non-scoreboard uses */
 .you-badge {
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--primary);
-}
-
-.leaderboard-score-block {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.expand-icon {
-  font-size: 0.6rem;
-  color: var(--muted);
-  opacity: 0.7;
 }
 
 .leaderboard-detail {
@@ -1282,13 +1454,8 @@ button:disabled {
   font-size: 0.85rem;
 }
 
-.golfer-row.counting {
-  background: #f5f8fd;
-}
-
-.golfer-row.bench {
-  opacity: 0.6;
-}
+.golfer-row.counting { background: #f5f8fd; }
+.golfer-row.bench    { opacity: 0.6; }
 
 /* ==========================================================================
    Sync controls

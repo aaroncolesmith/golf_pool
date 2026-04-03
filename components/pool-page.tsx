@@ -125,6 +125,153 @@ function PicksTab({
 }
 
 // ---------------------------------------------------------------------------
+// Scoreboard — Augusta-style flat board
+// ---------------------------------------------------------------------------
+
+function sbScoreStr(score: number | null): string {
+  if (score === null || score === 0) return "E";
+  return score > 0 ? `+${score}` : `${score}`;
+}
+
+function sbScoreClass(score: number | null, status?: string): string {
+  if (status === "eliminated") return "sb-cut";
+  if (score === null || score === 0) return "sb-even";
+  return score < 0 ? "sb-under" : "sb-over";
+}
+
+function lastNameOf(fullName: string): string {
+  const parts = fullName.trim().split(" ");
+  return parts[parts.length - 1].toUpperCase();
+}
+
+function Scoreboard({
+  leaderboard,
+  currentUserId,
+  isLocked,
+}: {
+  leaderboard: ReturnType<typeof buildLeaderboard>;
+  currentUserId: string | null;
+  isLocked: boolean;
+}) {
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  function toggleRow(entryId: string) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      next.has(entryId) ? next.delete(entryId) : next.add(entryId);
+      return next;
+    });
+  }
+
+  const activeRows = leaderboard.filter((r) => r.status !== "eliminated");
+  const eliminatedRows = leaderboard.filter((r) => r.status === "eliminated");
+
+  function rankOf(row: ReturnType<typeof buildLeaderboard>[number]): string {
+    const myScore = row.teamScore ?? 999;
+    const betterCount = activeRows.filter((r) => (r.teamScore ?? 999) < myScore).length;
+    const rank = betterCount + 1;
+    const tied = activeRows.filter((r) => (r.teamScore ?? 999) === myScore).length > 1;
+    return tied ? `T${rank}` : `${rank}`;
+  }
+
+  function renderRow(row: ReturnType<typeof buildLeaderboard>[number], isElim: boolean) {
+    const isExpanded = expandedRows.has(row.entryId);
+    const isYou = row.userId === currentUserId;
+    const canSeePicks = isLocked || isYou;
+
+    return (
+      <div key={row.entryId} className={`sb-row-wrap${isElim ? " sb-row-wrap--elim" : ""}`}>
+        <button className="sb-row" onClick={() => toggleRow(row.entryId)} type="button">
+          {/* Position */}
+          <span className="sb-col-pos sb-rank">
+            {isElim ? "—" : rankOf(row)}
+          </span>
+
+          {/* Team name */}
+          <span className="sb-col-team sb-team-name">
+            {row.teamName}
+            {isYou && <span className="sb-you">★</span>}
+          </span>
+
+          {/* Total score */}
+          <span className={`sb-col-tot sb-tot ${sbScoreClass(row.teamScore, row.status)}`}>
+            {isElim ? "OUT" : sbScoreStr(row.teamScore)}
+          </span>
+
+          {/* Counting golfer chips */}
+          <div className="sb-col-golfers sb-chips">
+            {canSeePicks ? (
+              row.countingGolfers.map((g) => (
+                <div className="sb-chip" key={g.id}>
+                  <span className="sb-chip-name">{lastNameOf(g.name)}</span>
+                  <span className={`sb-chip-score ${sbScoreClass(g.currentScoreToPar)}`}>
+                    {sbScoreStr(g.currentScoreToPar)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <span style={{ fontSize: "0.78rem", color: "#9ca8b6", fontStyle: "italic" }}>
+                Revealed at lock
+              </span>
+            )}
+          </div>
+        </button>
+
+        {/* Bench sub-row (expandable) */}
+        {isExpanded && canSeePicks && row.benchGolfers.length > 0 && (
+          <div className="sb-bench">
+            <span className="sb-bench-label">bench</span>
+            {row.benchGolfers.map((g) => (
+              <span
+                key={g.id}
+                className={`sb-bench-golfer${!g.madeCut ? " sb-bench-golfer--cut" : ""}`}
+              >
+                <span className="sb-bench-name">{lastNameOf(g.name)}</span>
+                <span className="sb-bench-score">
+                  {g.madeCut ? sbScoreStr(g.currentScoreToPar) : "CUT"}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="sb">
+      {/* Arch banner */}
+      <div className="sb-banner">
+        <span className="sb-banner-title">LEADERS</span>
+      </div>
+
+      {/* Column headers */}
+      <div className="sb-col-header">
+        <span className="sb-col-pos">POS</span>
+        <span>TEAM</span>
+        <span className="sb-col-tot">TOT</span>
+        <span className="sb-col-golfers">COUNTING GOLFERS</span>
+      </div>
+
+      {/* Active teams */}
+      {activeRows.map((row) => renderRow(row, false))}
+
+      {/* Eliminated separator + rows */}
+      {eliminatedRows.length > 0 && (
+        <>
+          <div className="sb-elim-divider">
+            <span className="sb-elim-divider-line" />
+            <span className="sb-elim-divider-label">Eliminated</span>
+            <span className="sb-elim-divider-line" />
+          </div>
+          {eliminatedRows.map((row) => renderRow(row, true))}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tab: Leaderboard
 // ---------------------------------------------------------------------------
 
@@ -145,18 +292,9 @@ function LeaderboardTab({
   scoresLastSyncedAt: string | null;
   onScoresSynced: (ts: string) => void;
 }) {
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const { refreshGolfers } = useAppState();
-
-  function toggleRowExpanded(entryId: string) {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      next.has(entryId) ? next.delete(entryId) : next.add(entryId);
-      return next;
-    });
-  }
 
   async function handleSyncScores() {
     setIsSyncing(true);
@@ -192,7 +330,7 @@ function LeaderboardTab({
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       {/* Sync controls */}
       {isMember && isLocked && (
-        <div className="sync-controls" style={{ marginBottom: 12 }}>
+        <div className="sync-controls" style={{ marginBottom: 16 }}>
           <button
             className="secondary-button small-button"
             onClick={handleSyncScores}
@@ -218,81 +356,11 @@ function LeaderboardTab({
           <p className="muted small">The leaderboard populates once members submit their picks.</p>
         </div>
       ) : (
-        <div className="leaderboard">
-          {leaderboard.map((row, index) => {
-            const isExpanded = expandedRows.has(row.entryId);
-            const isEliminated = row.status === "eliminated";
-            const isCurrentUser = currentUserId === row.userId;
-            const canSeePicks = isLocked || isCurrentUser;
-
-            return (
-              <div className="leaderboard-row" key={row.entryId}>
-                <button
-                  className="leaderboard-row-main"
-                  onClick={() => toggleRowExpanded(row.entryId)}
-                  type="button"
-                  aria-expanded={isExpanded}
-                >
-                  <div className="leaderboard-rank-block">
-                    <span className="leaderboard-rank">
-                      {isEliminated ? "—" : `#${index + 1}`}
-                    </span>
-                    <span className="leaderboard-name">
-                      {row.teamName}
-                      {isCurrentUser && <span className="you-badge"> (you)</span>}
-                    </span>
-                  </div>
-                  <div className="leaderboard-score-block">
-                    {isEliminated ? (
-                      <span className="status-pill eliminated">Out</span>
-                    ) : (
-                      <span className={scoreBadgeClass(row.teamScore ?? 0)}>
-                        {row.teamScore === null ? "E" : scoreLabel(row.teamScore)}
-                      </span>
-                    )}
-                    <span className="expand-icon">{isExpanded ? "▲" : "▼"}</span>
-                  </div>
-                </button>
-
-                {isExpanded && (
-                  <div className="leaderboard-detail">
-                    {canSeePicks ? (
-                      <div className="golfer-list">
-                        {row.countingGolfers.map((g) => (
-                          <div className="golfer-row counting" key={g.id}>
-                            <span style={{ fontWeight: 600 }}>{g.name}</span>
-                            <span className={g.currentScoreToPar < 0 ? "negative-score" : ""}>
-                              {scoreLabel(g.currentScoreToPar)}
-                            </span>
-                            <span className="muted small">{g.position}</span>
-                          </div>
-                        ))}
-                        {row.benchGolfers.map((g) => (
-                          <div className="golfer-row bench" key={g.id}>
-                            <span className="muted">{g.name}</span>
-                            <span className="muted">
-                              {g.madeCut ? scoreLabel(g.currentScoreToPar) : "CUT"}
-                            </span>
-                            <span className="muted small">bench</span>
-                          </div>
-                        ))}
-                        {isEliminated && (
-                          <p className="muted small" style={{ marginTop: 6 }}>
-                            Fewer than 4 golfers made the cut — this team is out.
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="muted small">
-                        Picks are revealed when the tournament starts.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <Scoreboard
+          leaderboard={leaderboard}
+          currentUserId={currentUserId}
+          isLocked={isLocked}
+        />
       )}
     </div>
   );
