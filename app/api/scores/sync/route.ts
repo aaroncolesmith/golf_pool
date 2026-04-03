@@ -59,25 +59,38 @@ export async function POST(request: Request) {
     );
   }
 
-  // Load our golfers for this tournament
+  // Load our golfers — include all NOT NULL columns so the upsert payload is
+  // complete (PostgREST evaluates NOT NULL constraints on the INSERT branch of
+  // ON CONFLICT before detecting the key conflict on some versions).
   const { data: ourGolfers, error: gError } = await supabase
     .from("golfers")
-    .select("id, name")
+    .select("id, name, tournament_id, odds_american, implied_probability")
     .eq("tournament_id", tournamentId);
 
   if (gError || !ourGolfers) {
     return NextResponse.json({ ok: false, error: "Failed to load golfer list." }, { status: 500 });
   }
 
-  // Build a normalized-name → id map for our golfers
-  const golferMap = new Map<string, string>();
-  for (const g of ourGolfers) {
-    golferMap.set(normalizeGolferName(g.name as string), g.id as string);
+  type OurGolfer = {
+    id: string;
+    name: string;
+    tournament_id: string;
+    odds_american: number;
+    implied_probability: number;
+  };
+
+  // Build a normalized-name → golfer map
+  const golferByNorm = new Map<string, OurGolfer>();
+  for (const g of ourGolfers as OurGolfer[]) {
+    golferByNorm.set(normalizeGolferName(g.name), g);
   }
 
-  // Match ESPN golfers to our golfers and build update payloads
   const updates: Array<{
     id: string;
+    tournament_id: string;
+    name: string;
+    odds_american: number;
+    implied_probability: number;
     current_score_to_par: number;
     position: string;
     made_cut: boolean;
@@ -88,26 +101,30 @@ export async function POST(request: Request) {
 
   for (const espnGolfer of espnResult.golfers) {
     const normalized = normalizeGolferName(espnGolfer.displayName);
-    let golferId = golferMap.get(normalized);
+    let ourGolfer = golferByNorm.get(normalized);
 
-    // Fallback: try matching on last name only
-    if (!golferId) {
+    // Fallback: last-name-only match
+    if (!ourGolfer) {
       const lastName = normalized.split(" ").at(-1) ?? "";
-      for (const [key, id] of golferMap) {
+      for (const [key, g] of golferByNorm) {
         if (key.endsWith(` ${lastName}`) || key === lastName) {
-          golferId = id;
+          ourGolfer = g;
           break;
         }
       }
     }
 
-    if (!golferId) {
+    if (!ourGolfer) {
       unmatched.push(espnGolfer.displayName);
       continue;
     }
 
     updates.push({
-      id: golferId,
+      id: ourGolfer.id,
+      tournament_id: ourGolfer.tournament_id,
+      name: ourGolfer.name,
+      odds_american: ourGolfer.odds_american,
+      implied_probability: ourGolfer.implied_probability,
       current_score_to_par: espnGolfer.scoreToParInt,
       position: espnGolfer.position,
       made_cut: espnGolfer.madeCut,
@@ -121,7 +138,10 @@ export async function POST(request: Request) {
 
     if (upsertError) {
       console.error("[sync] Upsert error:", upsertError);
-      return NextResponse.json({ ok: false, error: "Failed to write score updates." }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, error: `Failed to write score updates: ${upsertError.message}` },
+        { status: 500 },
+      );
     }
   }
 
