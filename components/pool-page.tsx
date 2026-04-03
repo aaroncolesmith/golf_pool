@@ -8,6 +8,7 @@ import { buildLeaderboard } from "@/lib/scoring";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAppState } from "@/lib/store";
 import { Golfer, Pool, TeamSelection } from "@/lib/types";
+import { AnalyticsTab } from "@/components/analytics-tab";
 import { formatDate } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ function formatLastSynced(isoString: string | null): string {
   return `Updated ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-type TabId = "picks" | "leaderboard" | "members" | "admin";
+type TabId = "picks" | "leaderboard" | "analytics" | "members" | "admin";
 
 // ---------------------------------------------------------------------------
 // Tab: My Picks
@@ -703,9 +704,16 @@ export function PoolPage({ poolId }: { poolId: string }) {
   }
 
   // Which tabs to show
+  const submittedEntries = state.entries.filter(
+    (e) => e.poolId === poolId && e.submittedAt !== null,
+  );
+
   const tabs: { id: TabId; label: string; badge?: number }[] = [
     { id: "picks", label: "My Picks" },
     { id: "leaderboard", label: "Leaderboard", badge: leaderboard.length || undefined },
+    ...(submittedEntries.length > 0
+      ? [{ id: "analytics" as TabId, label: "Analytics" }]
+      : []),
     { id: "members", label: "Members", badge: memberUsers.length || undefined },
     ...(isAdmin ? [{ id: "admin" as TabId, label: "⚙ Admin" }] : []),
   ];
@@ -806,6 +814,16 @@ export function PoolPage({ poolId }: { poolId: string }) {
             tournamentId={currentTournament.id}
             scoresLastSyncedAt={localSyncedAt ?? state.scoresLastSyncedAt}
             onScoresSynced={setLocalSyncedAt}
+          />
+        )}
+
+        {activeTab === "analytics" && (
+          <AnalyticsTab
+            leaderboard={leaderboard}
+            entries={state.entries}
+            pool={currentPool}
+            golferMap={golferMap}
+            users={state.users}
           />
         )}
 

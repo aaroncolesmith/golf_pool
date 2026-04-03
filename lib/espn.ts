@@ -34,8 +34,10 @@ type EspnLinescore = {
 type EspnCompetitor = {
   id: string;
   athlete: EspnAthlete;
-  score?: string; // score to par as string, e.g. "-12", "+4", "E"
-  status: {
+  score?: string; // score to par as string, e.g. "-12", "+4", "E", "CUT", "WD"
+  // NOTE: as of 2025+, status is on the competition level, not each competitor.
+  // Keep this optional so older-format responses still work.
+  status?: {
     type: EspnStatusType;
     period?: number; // current round number
   };
@@ -44,9 +46,15 @@ type EspnCompetitor = {
   order?: number; // leaderboard rank (1-indexed)
 };
 
+type EspnCompetitionStatus = {
+  period?: number; // current round number (1-indexed)
+  type: EspnStatusType;
+};
+
 type EspnCompetition = {
   id: string;
   competitors: EspnCompetitor[];
+  status?: EspnCompetitionStatus;
 };
 
 type EspnEvent = {
@@ -243,20 +251,47 @@ export async function fetchEspnScores(tournamentName: string): Promise<EspnSyncR
     return null;
   }
 
-  const competitors = event.competitions?.[0]?.competitors ?? [];
+  const competition = event.competitions?.[0];
+  const competitors = competition?.competitors ?? [];
+  // In the updated ESPN API, the current round lives on the competition status
+  const competitionPeriod = competition?.status?.period ?? 0;
 
   const rawGolfers: GolferScoreUpdate[] = competitors.map((c) => {
-    const statusName = c.status.type.name;
-    const madeCut = didMakeCut(statusName);
-    const roundsComplete = c.linescores?.filter((ls) => {
-      const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
-      return !isNaN(v);
-    }).length ?? (c.status.period ?? 0);
+    // status may be on the competitor (old API) or absent (new API where it
+    // lives on the competition object instead).
+    const statusName = c.status?.type?.name ?? "";
+    const scoreValue = c.score ?? "";
+
+    // Detect CUT/WD/DQ from the per-competitor status field (old API) or from
+    // the score string itself (new API encodes "CUT", "WD", "DQ" there).
+    const scoreTrimmed = scoreValue.trim().toUpperCase();
+    const isCutLike =
+      CUT_STATUSES.has(statusName) ||
+      scoreTrimmed === "CUT" ||
+      scoreTrimmed === "WD" ||
+      scoreTrimmed === "DQ" ||
+      scoreTrimmed === "MDF";
+
+    const madeCut = !isCutLike;
+
+    const roundsComplete =
+      c.linescores?.filter((ls) => {
+        const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
+        return typeof v === "number" && !isNaN(v);
+      }).length ?? competitionPeriod;
+
+    let position: string;
+    if (!madeCut) {
+      // Prefer the explicit status name; fall back to the score string (e.g. "CUT")
+      position = statusName ? positionFromStatus(statusName) : scoreTrimmed;
+    } else {
+      position = "TBD";
+    }
 
     return {
       displayName: c.athlete.displayName,
-      scoreToParInt: parseScoreToPar(c.score),
-      position: madeCut ? "TBD" : positionFromStatus(statusName),
+      scoreToParInt: isCutLike ? 0 : parseScoreToPar(scoreValue),
+      position,
       madeCut,
       roundsComplete,
     };
