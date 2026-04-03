@@ -8,12 +8,10 @@ type Props = {
   golferMap: Map<string, Golfer>;
   selections: TeamSelection[];
   onSelectionChange: (tierId: string, golferId: string) => void;
-  onSubmit: () => void;
   draftMessage: string | null;
   existingSubmittedAt: string | null;
   isLocked: boolean;
   isValid: boolean;
-  isDirty: boolean; // picks have changed since last submit
 };
 
 // ---------------------------------------------------------------------------
@@ -117,12 +115,10 @@ export function DraftBoard({
   golferMap,
   selections,
   onSelectionChange,
-  onSubmit,
   draftMessage,
   existingSubmittedAt,
   isLocked,
   isValid,
-  isDirty,
 }: Props) {
   const [activeTierIndex, setActiveTierIndex] = useState(0);
 
@@ -146,25 +142,21 @@ export function DraftBoard({
   const activeGolferId = selections.find((s) => s.tierId === activeTier.id)?.golferId ?? null;
   const selectedGolfer = activeGolferId ? golferMap.get(activeGolferId) : null;
 
-  // Submit is active when all picks are made AND (not yet submitted OR picks changed)
-  const submitActive = isValid && (!existingSubmittedAt || isDirty);
-  const submitLabel = !isValid
-    ? "Submit ✓"
-    : isDirty || !existingSubmittedAt
-      ? "Submit ✓"
-      : "Submitted ✓";
-
   function handlePickGolfer(tierId: string, golferId: string) {
+    // Was this tier already picked before this change?
+    const wasAlreadyPicked = selections.some((s) => s.tierId === tierId);
     onSelectionChange(tierId, golferId);
-    // Auto-advance to next unpicked tier
+
+    // Only auto-advance if this was a fresh pick (not an edit)
+    if (wasAlreadyPicked) return;
+
     const currentIdx = tiers.findIndex((t) => t.id === tierId);
-    const nextUnpicked = tiers.findIndex(
-      (t, i) => i > currentIdx && !selections.some((s) => s.tierId === t.id && s.golferId !== (t.id === tierId ? golferId : "")),
+    // Jump to the next tier that has no selection yet
+    const nextEmpty = tiers.findIndex(
+      (t, i) => i > currentIdx && !selections.some((s) => s.tierId === t.id),
     );
-    if (nextUnpicked !== -1) {
-      setTimeout(() => setActiveTierIndex(nextUnpicked), 240);
-    } else if (currentIdx < totalTiers - 1) {
-      setTimeout(() => setActiveTierIndex(currentIdx + 1), 240);
+    if (nextEmpty !== -1) {
+      setTimeout(() => setActiveTierIndex(nextEmpty), 240);
     }
   }
 
@@ -174,7 +166,7 @@ export function DraftBoard({
 
   return (
     <div className="draft-board">
-      {/* ── Top bar: Back | tier chips | Submit ── */}
+      {/* ── Top bar: Back | tier chips ── */}
       <div className="draft-controls">
         <button
           className="draft-nav-btn back"
@@ -210,16 +202,6 @@ export function DraftBoard({
             );
           })}
         </div>
-
-        <button
-          className={`draft-nav-btn${submitActive ? " submit" : " submit-disabled"}`}
-          type="button"
-          onClick={submitActive ? onSubmit : undefined}
-          disabled={!submitActive}
-          title={!isValid ? `${totalTiers - selections.length} more picks needed` : "Submit your team"}
-        >
-          {submitLabel}
-        </button>
       </div>
 
       {/* ── Selection chip — current pick or prompt ── */}
@@ -274,12 +256,15 @@ export function DraftBoard({
       </div>
 
       {/* ── Status line ── */}
-      {(draftMessage || (!isValid && selections.length > 0)) && (
-        <p className={`small${draftMessage?.includes("✓") || draftMessage?.includes("saved") ? "" : " muted"}`}
-          style={{ marginTop: 4, textAlign: "center" }}>
-          {draftMessage ?? `${selections.length} of ${totalTiers} picks made`}
-        </p>
-      )}
+      <p className="small muted" style={{ marginTop: 4, textAlign: "center", minHeight: "1.4em" }}>
+        {draftMessage
+          ? draftMessage
+          : isValid
+            ? "All picks saved ✓"
+            : selections.length > 0
+              ? `${selections.length} of ${totalTiers} picks made`
+              : null}
+      </p>
     </div>
   );
 }
