@@ -125,26 +125,92 @@ function PicksTab({
 }
 
 // ---------------------------------------------------------------------------
-// Scoreboard — Augusta-style flat board
+// Masterboard — Augusta Masters-style card grid
 // ---------------------------------------------------------------------------
 
-function sbScoreStr(score: number | null): string {
+type LbRow = ReturnType<typeof buildLeaderboard>[number];
+
+function mbScoreStr(score: number | null): string {
   if (score === null || score === 0) return "E";
   return score > 0 ? `+${score}` : `${score}`;
 }
 
-function sbScoreClass(score: number | null, status?: string): string {
-  if (status === "eliminated") return "sb-cut";
-  if (score === null || score === 0) return "sb-even";
-  return score < 0 ? "sb-under" : "sb-over";
+function mbScoreClass(score: number | null, eliminated?: boolean): string {
+  if (eliminated) return "mb-cut";
+  if (score === null || score === 0) return "mb-even";
+  return score < 0 ? "mb-under" : "mb-over";
 }
 
-function lastNameOf(fullName: string): string {
+function lastName(fullName: string): string {
   const parts = fullName.trim().split(" ");
   return parts[parts.length - 1].toUpperCase();
 }
 
-function Scoreboard({
+function MasterboardCard({
+  row,
+  rank,
+  isElim,
+  currentUserId,
+  isLocked,
+}: {
+  row: LbRow;
+  rank: string;
+  isElim: boolean;
+  currentUserId: string | null;
+  isLocked: boolean;
+}) {
+  const isYou = row.userId === currentUserId;
+  const canSeePicks = isLocked || isYou;
+
+  return (
+    <div className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
+      {/* Card header */}
+      <div className="mb-card-hdr">
+        <span className="mb-card-rank">{isElim ? "—" : rank}</span>
+        <span className="mb-card-name">
+          {row.teamName}
+          {isYou && <span className="mb-card-you">★</span>}
+        </span>
+        <span className={`mb-card-tot ${mbScoreClass(row.teamScore, isElim)}`}>
+          {isElim ? "OUT" : mbScoreStr(row.teamScore)}
+        </span>
+      </div>
+
+      {canSeePicks ? (
+        <>
+          {/* Counting golfer rows */}
+          {row.countingGolfers.map((g) => (
+            <div key={g.id} className="mb-row mb-row--counting">
+              <span className="mb-row-name">{lastName(g.name)}</span>
+              <span className={`mb-row-score ${mbScoreClass(g.currentScoreToPar)}`}>
+                {mbScoreStr(g.currentScoreToPar)}
+              </span>
+            </div>
+          ))}
+
+          {/* Bench golfer rows */}
+          {row.benchGolfers.map((g, idx) => (
+            <div
+              key={g.id}
+              className={`mb-row mb-row--bench${idx === 0 ? " mb-row--bench-first" : ""}${!g.madeCut ? " mb-row--cut" : ""}`}
+            >
+              <span className="mb-row-name">{lastName(g.name)}</span>
+              <span className={`mb-row-score ${mbScoreClass(g.madeCut ? g.currentScoreToPar : null)}`}>
+                {g.madeCut ? mbScoreStr(g.currentScoreToPar) : "CUT"}
+              </span>
+            </div>
+          ))}
+        </>
+      ) : (
+        <div className="mb-row mb-row--hidden">
+          <span className="mb-hidden-msg">Picks revealed at lock</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Masterboard({
   leaderboard,
   currentUserId,
   isLocked,
@@ -153,20 +219,10 @@ function Scoreboard({
   currentUserId: string | null;
   isLocked: boolean;
 }) {
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-
-  function toggleRow(entryId: string) {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      next.has(entryId) ? next.delete(entryId) : next.add(entryId);
-      return next;
-    });
-  }
-
   const activeRows = leaderboard.filter((r) => r.status !== "eliminated");
   const eliminatedRows = leaderboard.filter((r) => r.status === "eliminated");
 
-  function rankOf(row: ReturnType<typeof buildLeaderboard>[number]): string {
+  function rankOf(row: LbRow): string {
     const myScore = row.teamScore ?? 999;
     const betterCount = activeRows.filter((r) => (r.teamScore ?? 999) < myScore).length;
     const rank = betterCount + 1;
@@ -174,97 +230,47 @@ function Scoreboard({
     return tied ? `T${rank}` : `${rank}`;
   }
 
-  function renderRow(row: ReturnType<typeof buildLeaderboard>[number], isElim: boolean) {
-    const isExpanded = expandedRows.has(row.entryId);
-    const isYou = row.userId === currentUserId;
-    const canSeePicks = isLocked || isYou;
-
-    return (
-      <div key={row.entryId} className={`sb-row-wrap${isElim ? " sb-row-wrap--elim" : ""}`}>
-        <button className="sb-row" onClick={() => toggleRow(row.entryId)} type="button">
-          {/* Position */}
-          <span className="sb-col-pos sb-rank">
-            {isElim ? "—" : rankOf(row)}
-          </span>
-
-          {/* Team name */}
-          <span className="sb-col-team sb-team-name">
-            {row.teamName}
-            {isYou && <span className="sb-you">★</span>}
-          </span>
-
-          {/* Total score */}
-          <span className={`sb-col-tot sb-tot ${sbScoreClass(row.teamScore, row.status)}`}>
-            {isElim ? "OUT" : sbScoreStr(row.teamScore)}
-          </span>
-
-          {/* Counting golfer chips */}
-          <div className="sb-col-golfers sb-chips">
-            {canSeePicks ? (
-              row.countingGolfers.map((g) => (
-                <div className="sb-chip" key={g.id}>
-                  <span className="sb-chip-name">{lastNameOf(g.name)}</span>
-                  <span className={`sb-chip-score ${sbScoreClass(g.currentScoreToPar)}`}>
-                    {sbScoreStr(g.currentScoreToPar)}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <span style={{ fontSize: "0.78rem", color: "#9ca8b6", fontStyle: "italic" }}>
-                Revealed at lock
-              </span>
-            )}
-          </div>
-        </button>
-
-        {/* Bench sub-row (expandable) */}
-        {isExpanded && canSeePicks && row.benchGolfers.length > 0 && (
-          <div className="sb-bench">
-            <span className="sb-bench-label">bench</span>
-            {row.benchGolfers.map((g) => (
-              <span
-                key={g.id}
-                className={`sb-bench-golfer${!g.madeCut ? " sb-bench-golfer--cut" : ""}`}
-              >
-                <span className="sb-bench-name">{lastNameOf(g.name)}</span>
-                <span className="sb-bench-score">
-                  {g.madeCut ? sbScoreStr(g.currentScoreToPar) : "CUT"}
-                </span>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className="sb">
+    <div className="mb-shell">
       {/* Arch banner */}
-      <div className="sb-banner">
-        <span className="sb-banner-title">LEADERS</span>
+      <div className="mb-banner">
+        <span className="mb-banner-title">LEADERS</span>
       </div>
 
-      {/* Column headers */}
-      <div className="sb-col-header">
-        <span className="sb-col-pos">POS</span>
-        <span>TEAM</span>
-        <span className="sb-col-tot">TOT</span>
-        <span className="sb-col-golfers">COUNTING GOLFERS</span>
+      {/* Active team cards */}
+      <div className="mb-grid">
+        {activeRows.map((row) => (
+          <MasterboardCard
+            key={row.entryId}
+            row={row}
+            rank={rankOf(row)}
+            isElim={false}
+            currentUserId={currentUserId}
+            isLocked={isLocked}
+          />
+        ))}
       </div>
 
-      {/* Active teams */}
-      {activeRows.map((row) => renderRow(row, false))}
-
-      {/* Eliminated separator + rows */}
+      {/* Eliminated separator + cards */}
       {eliminatedRows.length > 0 && (
         <>
-          <div className="sb-elim-divider">
-            <span className="sb-elim-divider-line" />
-            <span className="sb-elim-divider-label">Eliminated</span>
-            <span className="sb-elim-divider-line" />
+          <div className="mb-elim-sep">
+            <span className="mb-elim-sep-line" />
+            <span className="mb-elim-sep-label">Eliminated</span>
+            <span className="mb-elim-sep-line" />
           </div>
-          {eliminatedRows.map((row) => renderRow(row, true))}
+          <div className="mb-grid">
+            {eliminatedRows.map((row) => (
+              <MasterboardCard
+                key={row.entryId}
+                row={row}
+                rank="—"
+                isElim={true}
+                currentUserId={currentUserId}
+                isLocked={isLocked}
+              />
+            ))}
+          </div>
         </>
       )}
     </div>
@@ -356,7 +362,7 @@ function LeaderboardTab({
           <p className="muted small">The leaderboard populates once members submit their picks.</p>
         </div>
       ) : (
-        <Scoreboard
+        <Masterboard
           leaderboard={leaderboard}
           currentUserId={currentUserId}
           isLocked={isLocked}
