@@ -728,19 +728,19 @@ function AdminTab({
           className="danger-button small-button"
           onClick={async () => {
             const confirmed = window.confirm(
-              "Are you sure you want to delete this tournament? This cannot be undone.",
+              "Are you sure you want to delete this pool? The tournament and golfer data will not be affected. This cannot be undone.",
             );
             if (!confirmed) return;
-            const res = await fetch(`/api/tournaments/${tournamentId}`, { method: "DELETE" });
+            const res = await fetch(`/api/pools/${currentPool.id}`, { method: "DELETE" });
             const data = (await res.json()) as { ok: boolean; error?: string };
             if (data.ok) {
               window.location.href = "/";
             } else {
-              alert(`Failed to delete tournament: ${data.error ?? "Unknown error"}`);
+              alert(`Failed to delete pool: ${data.error ?? "Unknown error"}`);
             }
           }}
         >
-          Delete Tournament
+          Delete Pool
         </button>
       </div>
     </div>
