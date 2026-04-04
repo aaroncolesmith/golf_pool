@@ -208,6 +208,7 @@ export async function GET(request: Request) {
       scoreTrimmed === "MDF";
 
     const madeCut = !isCutLike;
+    const scoreToParInt = isCutLike ? 0 : parseScoreToPar(scoreValue);
 
     // Per-round stroke counts, indexed by period number (1-based)
     const roundScores: Record<number, number | null> = {};
@@ -224,26 +225,45 @@ export async function GET(request: Request) {
       }
     }
 
-    // Today: last valid round value
-    let today: number | null = null;
-    if (c.linescores && c.linescores.length > 0) {
-      for (let i = c.linescores.length - 1; i >= 0; i--) {
-        const v = parseRoundScore(c.linescores[i].value);
-        if (v !== null) {
-          today = v;
-          break;
-        }
+    // Thru: parse competitor status detail into a clean display value
+    // ESPN detail examples: "Thru 14", "F", "F*72", "8:11 AM ET", "-"
+    const rawDetail = c.status?.type?.detail ?? "";
+    let thru = "-";
+    if (rawDetail) {
+      const thruMatch = rawDetail.match(/thru\s+(\d+\*?)/i);
+      if (thruMatch) {
+        // "Thru 14" → "14", "Thru 4*" → "4*"
+        thru = thruMatch[1];
+      } else if (/^F/i.test(rawDetail)) {
+        // "F", "F*72" → "F"
+        thru = "F";
+      } else {
+        // Tee time like "8:11 AM ET" → strip timezone suffix
+        const timeMatch = rawDetail.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+        thru = timeMatch ? timeMatch[1] : rawDetail;
       }
     }
 
-    // Thru: use competitor status detail, then competition status detail, then fallback
-    let thru = "-";
-    const competitorDetail = c.status?.type?.detail;
-    const competitionDetail = competitionStatus?.type?.detail;
-    if (competitorDetail) {
-      thru = competitorDetail;
-    } else if (competitionDetail) {
-      thru = competitionDetail;
+    // Today: to-par for the current round.
+    // Formula: today = totalTopar − sum of completed previous rounds' to-par
+    // For PGA Tour events par is always 72 per round.
+    const PAR_PER_ROUND = 72;
+    const currentPeriod = competitionStatus?.period ?? 1;
+    let today: number | null = null;
+
+    if (madeCut) {
+      const hasStartedToday = thru !== "-" && !/^\d{1,2}:\d{2}/.test(thru);
+      if (hasStartedToday) {
+        // Sum raw strokes for all rounds BEFORE today
+        let completedTopar = 0;
+        for (let p = 1; p < currentPeriod; p++) {
+          const raw = roundScores[p];
+          if (raw !== null && raw !== undefined) {
+            completedTopar += raw - PAR_PER_ROUND;
+          }
+        }
+        today = scoreToParInt - completedTopar;
+      }
     }
 
     // Position for cut players
@@ -255,8 +275,6 @@ export async function GET(request: Request) {
     } else {
       position = c.order !== undefined ? String(c.order) : "TBD";
     }
-
-    const scoreToParInt = isCutLike ? 0 : parseScoreToPar(scoreValue);
 
     return {
       name: c.athlete.displayName,
