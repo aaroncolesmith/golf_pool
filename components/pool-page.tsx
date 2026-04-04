@@ -1099,12 +1099,15 @@ export function PoolPage({ poolId }: { poolId: string }) {
   }
 
   if (!pool || !tournament) {
+    const message = pool && !tournament
+      ? "The tournament for this pool has been deleted."
+      : "This pool doesn't exist or you don't have access.";
     return (
       <main className="centered-page">
         <div className="panel callback-panel" style={{ gap: 14, display: "flex", flexDirection: "column" }}>
           <p className="eyebrow">Not found</p>
           <h1 style={{ fontSize: "1.8rem" }}>Pool not found</h1>
-          <p className="muted">This pool doesn&apos;t exist or hasn&apos;t loaded yet.</p>
+          <p className="muted">{message}</p>
           <Link className="primary-button" href="/" style={{ alignSelf: "flex-start" }}>
             Return home
           </Link>
