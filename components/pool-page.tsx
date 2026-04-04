@@ -757,20 +757,48 @@ function TournamentLeaderboard({
       .finally(() => setLoading(false));
   }, [tournamentId]);
 
-  // Build a map from golfer name (normalized) to team names
+  // Normalize names the same way the sync does: lowercase, strip diacritics,
+  // remove non-alpha chars, collapse whitespace.
+  function normName(name: string): string {
+    return name
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z\s'-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // Build a map from normalized golfer name → team names.
+  // Also index by last name alone as a fallback.
   const golferNameToTeams = useMemo<Map<string, string[]>>(() => {
     const map = new Map<string, string[]>();
+    const addEntry = (key: string, teamName: string) => {
+      const existing = map.get(key) ?? [];
+      if (!existing.includes(teamName)) existing.push(teamName);
+      map.set(key, existing);
+    };
     for (const row of leaderboard) {
       const allGolfers = [...row.countingGolfers, ...row.benchGolfers];
       for (const g of allGolfers) {
-        const norm = g.name.toLowerCase().trim();
-        const teams = map.get(norm) ?? [];
-        teams.push(row.teamName);
-        map.set(norm, teams);
+        const norm = normName(g.name);
+        addEntry(norm, row.teamName);
+        // Also index by last name for fuzzy fallback
+        const lastName = norm.split(" ").at(-1) ?? "";
+        if (lastName) addEntry(`__last__${lastName}`, row.teamName);
       }
     }
     return map;
   }, [leaderboard]);
+
+  // Look up teams for an ESPN golfer name, with last-name fallback
+  function teamsForGolfer(espnName: string): string[] {
+    const norm = normName(espnName);
+    const exact = golferNameToTeams.get(norm);
+    if (exact && exact.length > 0) return exact;
+    const lastName = norm.split(" ").at(-1) ?? "";
+    return golferNameToTeams.get(`__last__${lastName}`) ?? [];
+  }
 
   function handleSort(key: SortKey) {
     if (sortKey === key) {
@@ -886,7 +914,7 @@ function TournamentLeaderboard({
           </thead>
           <tbody>
             {rows.map((g) => {
-              const teams = golferNameToTeams.get(g.name.toLowerCase().trim()) ?? [];
+              const teams = teamsForGolfer(g.name);
               const isCut = !g.madeCut;
               return (
                 <tr key={g.name} className={`tournament-lb-row${isCut ? " tournament-lb-row--cut" : ""}`}>

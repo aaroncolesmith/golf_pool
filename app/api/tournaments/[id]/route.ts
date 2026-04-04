@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
 /**
  * DELETE /api/tournaments/[id]
  *
  * Deletes a tournament. The requesting user must be the admin of at least one
  * pool associated with this tournament.
+ *
+ * Auth check uses the session client (respects RLS on pools).
+ * The actual delete uses the service-role client to bypass the missing
+ * DELETE RLS policy on the tournaments table.
  *
  * Response:
  *   { ok: true }
@@ -21,9 +26,9 @@ export async function DELETE(
     return NextResponse.json({ ok: false, error: "Tournament ID is required." }, { status: 400 });
   }
 
+  // Use session client for auth + authorization check
   const supabase = await createSupabaseServerClient();
 
-  // Verify authentication
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -50,8 +55,14 @@ export async function DELETE(
     return NextResponse.json({ ok: false, error: "Not authorized to delete this tournament." }, { status: 403 });
   }
 
-  // Delete the tournament
-  const { error: deleteError } = await supabase
+  // Use service-role client to bypass RLS for the delete
+  // (there is no DELETE policy on tournaments — inserts/updates only)
+  const adminClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  );
+
+  const { error: deleteError } = await adminClient
     .from("tournaments")
     .delete()
     .eq("id", id);
