@@ -2632,3 +2632,151 @@ button:disabled {
     padding-left: 28px;
   }
 }
+
+/* ==========================================================================
+   Leaderboard sub-view toggle
+   ========================================================================== */
+
+.leaderboard-view-toggle {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   Tournament leaderboard table
+   ========================================================================== */
+
+.tournament-lb-wrapper {
+  width: 100%;
+}
+
+.tournament-lb-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tournament-lb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.tournament-lb-th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 2px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+.tournament-lb-td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.tournament-lb-row:hover td {
+  background: var(--surface-muted);
+}
+
+.tournament-lb-row--cut td {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.tournament-lb-pos {
+  font-weight: 700;
+  min-width: 40px;
+}
+
+.tournament-lb-name {
+  font-weight: 600;
+  min-width: 140px;
+}
+
+.tournament-lb-score {
+  text-align: right;
+  min-width: 50px;
+}
+
+.tournament-lb-today {
+  text-align: right;
+  min-width: 50px;
+}
+
+.tournament-lb-thru {
+  color: var(--muted);
+  font-size: 0.82rem;
+  min-width: 60px;
+}
+
+.tournament-lb-teams {
+  min-width: 120px;
+}
+
+.tournament-lb-team-badge {
+  display: inline-flex;
+  align-items: center;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid rgba(28, 110, 231, 0.18);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-right: 4px;
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.tournament-lb-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 0;
+}
+
+.tournament-lb-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--line);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: lb-spin 0.8s linear infinite;
+}
+
+@keyframes lb-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Danger button
+   ========================================================================== */
+
+.danger-button {
+  border-radius: 999px;
+  padding: 11px 16px;
+  border: 1px solid transparent;
+  background: linear-gradient(180deg, #c0392b 0%, #a84534 100%);
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(168, 69, 52, 0.22);
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.danger-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  opacity: 0.9;
+}
+
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
