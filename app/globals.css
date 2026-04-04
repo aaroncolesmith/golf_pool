@@ -1241,6 +1241,7 @@ button:disabled {
 /* Fixed column widths */
 .mb-col-rank  { width: 36px; }
 .mb-col-score { width: 52px; }
+.mb-col-thru  { width: 40px; text-align: right; font-size: 0.65rem; color: var(--muted); padding-right: 6px; }
 /* mb-col-name fills the remaining space */
 
 /* ── Header row (thead) ── */

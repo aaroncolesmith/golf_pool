@@ -155,15 +155,50 @@ function MasterboardCard({
   isElim,
   currentUserId,
   isLocked,
+  thruMap,
 }: {
   row: LbRow;
   rank: string;
   isElim: boolean;
   currentUserId: string | null;
   isLocked: boolean;
+  thruMap: Map<string, string>;
 }) {
   const isYou = row.userId === currentUserId;
   const canSeePicks = isLocked || isYou;
+
+  function normForThru(name: string): string {
+    return name
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z\s'-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getThru(name: string): string {
+    const norm = normForThru(name);
+    const exact = thruMap.get(norm);
+    if (exact) return exact;
+    const last = norm.split(" ").at(-1) ?? "";
+    return thruMap.get(`__last__${last}`) ?? "-";
+  }
+
+  function GolferRow({ g, className }: { g: Golfer; className: string }) {
+    const thru = getThru(g.name);
+    const isCut = !g.madeCut;
+    return (
+      <tr key={g.id} className={`${className}${isCut ? " mb-cut-row" : ""}`}>
+        <td className="mb-col-rank" />
+        <td className="mb-col-name">{lastName(g.name)}</td>
+        <td className={`mb-col-score ${isCut ? "mb-grey" : mbScoreClass(g.currentScoreToPar)}`}>
+          {isCut ? "CUT" : mbScoreStr(g.currentScoreToPar)}
+        </td>
+        <td className="mb-col-thru">{isCut ? "" : thru}</td>
+      </tr>
+    );
+  }
 
   return (
     <table className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
@@ -171,6 +206,7 @@ function MasterboardCard({
         <col className="mb-col-rank" />
         <col className="mb-col-name" />
         <col className="mb-col-score" />
+        <col className="mb-col-thru" />
       </colgroup>
       <thead>
         <tr>
@@ -182,36 +218,22 @@ function MasterboardCard({
           <th className={`mb-col-score ${mbScoreClass(row.teamScore, isElim)}`}>
             {isElim ? "OUT" : mbScoreStr(row.teamScore)}
           </th>
+          <th className="mb-col-thru" />
         </tr>
       </thead>
       <tbody>
         {canSeePicks ? (
           <>
             {row.countingGolfers.map((g) => (
-              <tr key={g.id} className="mb-counting">
-                <td className="mb-col-rank" />
-                <td className="mb-col-name">{lastName(g.name)}</td>
-                <td className={`mb-col-score ${mbScoreClass(g.currentScoreToPar)}`}>
-                  {mbScoreStr(g.currentScoreToPar)}
-                </td>
-              </tr>
+              <GolferRow key={g.id} g={g} className="mb-counting" />
             ))}
             {row.benchGolfers.map((g, idx) => (
-              <tr
-                key={g.id}
-                className={`mb-bench${idx === 0 ? " mb-bench-first" : ""}${!g.madeCut ? " mb-cut-row" : ""}`}
-              >
-                <td className="mb-col-rank" />
-                <td className="mb-col-name">{lastName(g.name)}</td>
-                <td className={`mb-col-score ${g.madeCut ? mbScoreClass(g.currentScoreToPar) : "mb-grey"}`}>
-                  {g.madeCut ? mbScoreStr(g.currentScoreToPar) : "CUT"}
-                </td>
-              </tr>
+              <GolferRow key={g.id} g={g} className={`mb-bench${idx === 0 ? " mb-bench-first" : ""}`} />
             ))}
           </>
         ) : (
           <tr className="mb-counting">
-            <td colSpan={3} style={{ textAlign: "center", fontStyle: "italic", color: "#9ca8b6", fontSize: "0.7rem", padding: "10px" }}>
+            <td colSpan={4} style={{ textAlign: "center", fontStyle: "italic", color: "#9ca8b6", fontSize: "0.7rem", padding: "10px" }}>
               Picks revealed at lock
             </td>
           </tr>
@@ -225,10 +247,12 @@ function Masterboard({
   leaderboard,
   currentUserId,
   isLocked,
+  thruMap,
 }: {
   leaderboard: ReturnType<typeof buildLeaderboard>;
   currentUserId: string | null;
   isLocked: boolean;
+  thruMap: Map<string, string>;
 }) {
   const activeRows = leaderboard.filter((r) => r.status !== "eliminated");
   const eliminatedRows = leaderboard.filter((r) => r.status === "eliminated");
@@ -257,6 +281,7 @@ function Masterboard({
             isElim={false}
             currentUserId={currentUserId}
             isLocked={isLocked}
+            thruMap={thruMap}
           />
         ))}
       </div>
@@ -277,6 +302,7 @@ function Masterboard({
                 isElim={true}
                 currentUserId={currentUserId}
                 isLocked={isLocked}
+                thruMap={thruMap}
               />
             ))}
           </div>
@@ -316,7 +342,30 @@ function LeaderboardTab({
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [view, setView] = useState<"pool" | "tournament">("pool");
+  const [thruMap, setThruMap] = useState<Map<string, string>>(new Map());
   const { refreshGolfers } = useAppState();
+
+  // Fetch tournament leaderboard data to power the Thru column in pool cards
+  useEffect(() => {
+    if (!isLocked) return;
+    function normName(name: string): string {
+      return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
+    }
+    fetch(`/api/scores/tournament?tournamentId=${encodeURIComponent(tournamentId)}`)
+      .then((r) => r.json())
+      .then((data: { ok: boolean; golfers?: TournamentGolferRow[] }) => {
+        if (!data.ok || !data.golfers) return;
+        const map = new Map<string, string>();
+        for (const g of data.golfers) {
+          const norm = normName(g.name);
+          map.set(norm, g.thru);
+          const last = norm.split(" ").at(-1) ?? "";
+          if (last) map.set(`__last__${last}`, g.thru);
+        }
+        setThruMap(map);
+      })
+      .catch(() => { /* thru data is best-effort */ });
+  }, [isLocked, tournamentId]);
 
   const handleSyncScores = useCallback(async (silent = false) => {
     if (!silent) setIsSyncing(true);
@@ -394,6 +443,7 @@ function LeaderboardTab({
             leaderboard={leaderboard}
             currentUserId={currentUserId}
             isLocked={isLocked}
+            thruMap={thruMap}
           />
         )
       ) : (
