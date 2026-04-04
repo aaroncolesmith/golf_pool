@@ -8,7 +8,7 @@ import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
 import { buildLeaderboard } from "@/lib/scoring";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAppState } from "@/lib/store";
-import { Golfer, Pool, TeamSelection } from "@/lib/types";
+import { Golfer, Pool, PoolEntry, TeamSelection } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 /** Auto-refresh interval while tournament is in progress (5 minutes) */
@@ -298,6 +298,9 @@ function LeaderboardTab({
   tournamentId,
   scoresLastSyncedAt,
   onScoresSynced,
+  golferMap,
+  entries,
+  users,
 }: {
   leaderboard: ReturnType<typeof buildLeaderboard>;
   isLocked: boolean;
@@ -306,9 +309,13 @@ function LeaderboardTab({
   tournamentId: string;
   scoresLastSyncedAt: string | null;
   onScoresSynced: (ts: string) => void;
+  golferMap: Map<string, Golfer>;
+  entries: PoolEntry[];
+  users: { id: string; userName: string }[];
 }) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [view, setView] = useState<"pool" | "tournament">("pool");
   const { refreshGolfers } = useAppState();
 
   const handleSyncScores = useCallback(async (silent = false) => {
@@ -353,38 +360,49 @@ function LeaderboardTab({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-      {/* Manual sync controls */}
-      {isMember && isLocked && (
-        <div className="sync-controls" style={{ marginBottom: 16 }}>
-          <button
-            className="secondary-button small-button"
-            onClick={() => handleSyncScores(false)}
-            disabled={isSyncing}
-            type="button"
-          >
-            {isSyncing ? "Syncing…" : "↻ Sync Scores"}
-          </button>
-          {scoresLastSyncedAt && (
-            <span className="sync-timestamp">{formatLastSynced(scoresLastSyncedAt)}</span>
-          )}
-        </div>
-      )}
+      {/* Sub-view toggle */}
+      <div className="leaderboard-view-toggle" style={{ marginBottom: 16 }}>
+        <button
+          type="button"
+          className={view === "pool" ? "primary-button small-button" : "secondary-button small-button"}
+          onClick={() => setView("pool")}
+        >
+          Pool Leaderboard
+        </button>
+        <button
+          type="button"
+          className={view === "tournament" ? "primary-button small-button" : "secondary-button small-button"}
+          onClick={() => setView("tournament")}
+        >
+          Tournament Leaderboard
+        </button>
+      </div>
 
       {syncMessage && (
         <p className="muted small" style={{ marginBottom: 12 }}>{syncMessage}</p>
       )}
 
-      {leaderboard.length === 0 ? (
-        <div className="empty-state">
-          <span className="empty-state-icon">📊</span>
-          <p style={{ fontWeight: 700 }}>No teams yet</p>
-          <p className="muted small">The leaderboard populates once members submit their picks.</p>
-        </div>
+      {view === "pool" ? (
+        leaderboard.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-state-icon">📊</span>
+            <p style={{ fontWeight: 700 }}>No teams yet</p>
+            <p className="muted small">The leaderboard populates once members submit their picks.</p>
+          </div>
+        ) : (
+          <Masterboard
+            leaderboard={leaderboard}
+            currentUserId={currentUserId}
+            isLocked={isLocked}
+          />
+        )
       ) : (
-        <Masterboard
+        <TournamentLeaderboard
+          tournamentId={tournamentId}
+          golferMap={golferMap}
+          entries={entries}
+          users={users}
           leaderboard={leaderboard}
-          currentUserId={currentUserId}
-          isLocked={isLocked}
         />
       )}
     </div>
@@ -641,6 +659,263 @@ function AdminTab({
           </div>
         </div>
       )}
+
+      {/* Danger zone — delete tournament */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+        <p
+          style={{
+            fontSize: "0.75rem",
+            fontWeight: 800,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            color: "var(--danger)",
+          }}
+        >
+          Danger Zone
+        </p>
+        <button
+          type="button"
+          className="danger-button small-button"
+          onClick={async () => {
+            const confirmed = window.confirm(
+              "Are you sure you want to delete this tournament? This cannot be undone.",
+            );
+            if (!confirmed) return;
+            const res = await fetch(`/api/tournaments/${tournamentId}`, { method: "DELETE" });
+            const data = (await res.json()) as { ok: boolean; error?: string };
+            if (data.ok) {
+              window.location.href = "/";
+            } else {
+              alert(`Failed to delete tournament: ${data.error ?? "Unknown error"}`);
+            }
+          }}
+        >
+          Delete Tournament
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tournament Leaderboard component
+// ---------------------------------------------------------------------------
+
+type TournamentGolferRow = {
+  name: string;
+  position: string;
+  score: number;
+  today: number | null;
+  thru: string;
+  r1: number | null;
+  r2: number | null;
+  r3: number | null;
+  r4: number | null;
+  madeCut: boolean;
+};
+
+type SortKey = "position" | "name" | "score" | "today" | "thru" | "r1" | "r2" | "r3" | "r4";
+
+function positionSortValue(pos: string): number {
+  if (pos === "CUT" || pos === "WD" || pos === "DQ") return 9999;
+  const n = parseInt(pos.replace(/^T/, ""), 10);
+  return isNaN(n) ? 9998 : n;
+}
+
+function TournamentLeaderboard({
+  tournamentId,
+  golferMap,
+  entries,
+  users,
+  leaderboard,
+}: {
+  tournamentId: string;
+  golferMap: Map<string, Golfer>;
+  entries: PoolEntry[];
+  users: { id: string; userName: string }[];
+  leaderboard: ReturnType<typeof buildLeaderboard>;
+}) {
+  const [golfers, setGolfers] = useState<TournamentGolferRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("position");
+  const [sortAsc, setSortAsc] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    fetch(`/api/scores/tournament?tournamentId=${encodeURIComponent(tournamentId)}`)
+      .then((r) => r.json())
+      .then((data: { ok: boolean; golfers?: TournamentGolferRow[]; error?: string }) => {
+        if (data.ok && data.golfers) {
+          setGolfers(data.golfers);
+        } else {
+          setError(data.error ?? "Failed to load tournament data.");
+        }
+      })
+      .catch(() => setError("Failed to load tournament data."))
+      .finally(() => setLoading(false));
+  }, [tournamentId]);
+
+  // Build a map from golfer name (normalized) to team names
+  const golferNameToTeams = useMemo<Map<string, string[]>>(() => {
+    const map = new Map<string, string[]>();
+    for (const row of leaderboard) {
+      const allGolfers = [...row.countingGolfers, ...row.benchGolfers];
+      for (const g of allGolfers) {
+        const norm = g.name.toLowerCase().trim();
+        const teams = map.get(norm) ?? [];
+        teams.push(row.teamName);
+        map.set(norm, teams);
+      }
+    }
+    return map;
+  }, [leaderboard]);
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortAsc((prev) => !prev);
+    } else {
+      setSortKey(key);
+      setSortAsc(true);
+    }
+  }
+
+  function sortedGolfers(): TournamentGolferRow[] {
+    return [...golfers].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "position":
+          cmp = positionSortValue(a.position) - positionSortValue(b.position);
+          break;
+        case "name":
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case "score":
+          cmp = a.score - b.score;
+          break;
+        case "today":
+          cmp = (a.today ?? 999) - (b.today ?? 999);
+          break;
+        case "thru":
+          cmp = a.thru.localeCompare(b.thru);
+          break;
+        case "r1":
+          cmp = (a.r1 ?? 999) - (b.r1 ?? 999);
+          break;
+        case "r2":
+          cmp = (a.r2 ?? 999) - (b.r2 ?? 999);
+          break;
+        case "r3":
+          cmp = (a.r3 ?? 999) - (b.r3 ?? 999);
+          break;
+        case "r4":
+          cmp = (a.r4 ?? 999) - (b.r4 ?? 999);
+          break;
+      }
+      return sortAsc ? cmp : -cmp;
+    });
+  }
+
+  function sortIndicator(key: SortKey) {
+    if (sortKey !== key) return null;
+    return <span style={{ marginLeft: 4, opacity: 0.6 }}>{sortAsc ? "↑" : "↓"}</span>;
+  }
+
+  if (loading) {
+    return (
+      <div className="tournament-lb-loading">
+        <div className="tournament-lb-spinner" />
+        <p className="muted small">Loading tournament leaderboard…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="empty-state">
+        <span className="empty-state-icon">🏌️</span>
+        <p style={{ fontWeight: 700 }}>Could not load leaderboard</p>
+        <p className="muted small">{error}</p>
+      </div>
+    );
+  }
+
+  if (golfers.length === 0) {
+    return (
+      <div className="empty-state">
+        <span className="empty-state-icon">🏌️</span>
+        <p style={{ fontWeight: 700 }}>No data available</p>
+        <p className="muted small">Tournament leaderboard data is not yet available.</p>
+      </div>
+    );
+  }
+
+  const rows = sortedGolfers();
+
+  return (
+    <div className="tournament-lb-wrapper">
+      <div className="tournament-lb-scroll">
+        <table className="tournament-lb-table">
+          <thead>
+            <tr>
+              {(
+                [
+                  { key: "position" as SortKey, label: "Pos" },
+                  { key: "name" as SortKey, label: "Golfer" },
+                  { key: "score" as SortKey, label: "Score" },
+                  { key: "today" as SortKey, label: "Today" },
+                  { key: "thru" as SortKey, label: "Thru" },
+                  { key: "r1" as SortKey, label: "R1" },
+                  { key: "r2" as SortKey, label: "R2" },
+                  { key: "r3" as SortKey, label: "R3" },
+                  { key: "r4" as SortKey, label: "R4" },
+                ] as { key: SortKey; label: string }[]
+              ).map(({ key, label }) => (
+                <th
+                  key={key}
+                  className="tournament-lb-th"
+                  onClick={() => handleSort(key)}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                >
+                  {label}{sortIndicator(key)}
+                </th>
+              ))}
+              <th className="tournament-lb-th">Teams</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((g) => {
+              const teams = golferNameToTeams.get(g.name.toLowerCase().trim()) ?? [];
+              const isCut = !g.madeCut;
+              return (
+                <tr key={g.name} className={`tournament-lb-row${isCut ? " tournament-lb-row--cut" : ""}`}>
+                  <td className="tournament-lb-td tournament-lb-pos">{g.position}</td>
+                  <td className="tournament-lb-td tournament-lb-name">{g.name}</td>
+                  <td className="tournament-lb-td tournament-lb-score">
+                    <span className={scoreBadgeClass(g.score)}>{isCut ? "—" : scoreLabel(g.score)}</span>
+                  </td>
+                  <td className="tournament-lb-td tournament-lb-today">
+                    {g.today !== null ? (
+                      <span className={scoreBadgeClass(g.today - 72)}>{g.today}</span>
+                    ) : "—"}
+                  </td>
+                  <td className="tournament-lb-td tournament-lb-thru">{g.thru}</td>
+                  <td className="tournament-lb-td">{g.r1 ?? "—"}</td>
+                  <td className="tournament-lb-td">{g.r2 ?? "—"}</td>
+                  <td className="tournament-lb-td">{g.r3 ?? "—"}</td>
+                  <td className="tournament-lb-td">{g.r4 ?? "—"}</td>
+                  <td className="tournament-lb-td tournament-lb-teams">
+                    {teams.map((team) => (
+                      <span key={team} className="tournament-lb-team-badge">{team}</span>
+                    ))}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -907,6 +1182,9 @@ export function PoolPage({ poolId }: { poolId: string }) {
             tournamentId={currentTournament.id}
             scoresLastSyncedAt={localSyncedAt ?? state.scoresLastSyncedAt}
             onScoresSynced={setLocalSyncedAt}
+            golferMap={golferMap}
+            entries={state.entries}
+            users={state.users}
           />
         )}
 
