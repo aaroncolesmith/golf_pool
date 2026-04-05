@@ -71,6 +71,7 @@ export type Pool = {
   createdAt: string;
   lockAt: string;
   tiers: Tier[];
+  tiersSubmittedAt: string | null;
 };
 
 export type AppState = {

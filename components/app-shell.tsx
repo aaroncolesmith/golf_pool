@@ -94,7 +94,7 @@ function AuthPage() {
     <main className="page-shell">
       <section className="auth-landing">
         <div className="auth-brand">
-          <p className="eyebrow">Golf Pool</p>
+          <p className="eyebrow">GolfPool</p>
           <h1>Build weekly PGA pools without spreadsheet chaos.</h1>
           <p className="hero-text" style={{ marginTop: 16, fontSize: "1.05rem", lineHeight: 1.6 }}>
             Import the field, configure tiers, and let your group draft in a clean weekly pool flow.
@@ -435,7 +435,7 @@ export function AppShell() {
     return (
       <main className="centered-page">
         <div className="panel callback-panel">
-          <p className="eyebrow">Golf Pool</p>
+          <p className="eyebrow">GolfPool</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
             <div className="skeleton-line tall medium" />
             <div className="skeleton-line short" />

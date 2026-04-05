@@ -37,6 +37,7 @@ type AppContextValue = {
   createPool: (input: CreatePoolInput) => Promise<Pool | null>;
   joinPool: (joinCode: string) => Promise<Pool | null>;
   updatePoolTiers: (poolId: string, tiers: Tier[]) => Promise<void>;
+  submitTiers: (poolId: string) => Promise<void>;
   inviteEmails: (poolId: string, emails: string[]) => Promise<void>;
   saveEntry: (poolId: string, selections: TeamSelection[], submit: boolean) => Promise<PoolEntry | null>;
   importTournamentFeed: (tournament: Tournament, golfers: Golfer[]) => Promise<void>;
@@ -169,7 +170,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .select(
           "id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete",
         ),
-      supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers"),
+      supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers,tiers_submitted_at"),
       supabase.from("pool_members").select("pool_id,user_id"),
       supabase.from("pool_entries").select("id,pool_id,user_id,selections,submitted_at"),
     ]);
@@ -197,6 +198,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         createdAt: pool.created_at,
         lockAt: pool.lock_at,
         tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
+        tiersSubmittedAt: (pool as { tiers_submitted_at?: string | null }).tiers_submitted_at ?? null,
       })) ?? [];
 
     const entries: PoolEntry[] =
@@ -376,6 +378,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           createdAt: pool.created_at,
           lockAt: input.lockAt,
           tiers: input.tiers,
+          tiersSubmittedAt: null,
         };
       },
 
@@ -403,12 +406,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           createdAt: pool.created_at,
           lockAt: pool.lock_at,
           tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
+          tiersSubmittedAt: null,
         };
       },
 
       async updatePoolTiers(poolId, tiers) {
         const supabase = await getSupabaseBrowserClient();
         await supabase.from("pools").update({ tiers }).eq("id", poolId);
+        await loadState();
+      },
+
+      async submitTiers(poolId) {
+        const supabase = await getSupabaseBrowserClient();
+        await supabase
+          .from("pools")
+          .update({ tiers_submitted_at: new Date().toISOString() })
+          .eq("id", poolId);
         await loadState();
       },
 
@@ -428,6 +441,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         const pool = state.pools.find((p) => p.id === poolId);
         if (!pool || !pool.memberUserIds.includes(currentUser.id)) return null;
+        if (!pool.tiersSubmittedAt) return null;
         if (isPoolLocked(pool)) return null;
         if (submit && !validateSelections(pool, selections).isValid) return null;
 
