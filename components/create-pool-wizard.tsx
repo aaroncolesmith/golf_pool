@@ -189,6 +189,7 @@ export function CreatePoolWizard() {
       <section className="dashboard-nav">
         <div className="brand-lockup">
           <strong>GolfPool</strong>
+          <span style={{ fontSize: "0.65rem", fontWeight: 500, color: "var(--muted)", letterSpacing: "0.03em", marginLeft: 5 }}>v0.37</span>
         </div>
         <div className="dashboard-actions">
           <span className="profile-badge" aria-label={currentUser.userName}>
