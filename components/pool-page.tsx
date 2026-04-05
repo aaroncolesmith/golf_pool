@@ -8,7 +8,7 @@ import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
 import { buildLeaderboard } from "@/lib/scoring";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAppState } from "@/lib/store";
-import { Golfer, Pool, PoolEntry, TeamSelection } from "@/lib/types";
+import { Golfer, Pool, PoolEntry, TeamSelection, Tier, Tournament } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 /** Auto-refresh interval while tournament is in progress (5 minutes) */
@@ -34,7 +34,7 @@ function formatLastSynced(isoString: string | null): string {
   return `Updated ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-type TabId = "picks" | "leaderboard" | "analytics" | "members" | "admin";
+type TabId = "picks" | "tiers" | "leaderboard" | "analytics" | "members" | "admin";
 
 // ---------------------------------------------------------------------------
 // Tab: My Picks
@@ -108,6 +108,18 @@ function PicksTab({
         <p style={{ fontWeight: 700 }}>You&apos;re not in this pool</p>
         <p className="muted small">
           Join using a valid invite link or the join code on your dashboard.
+        </p>
+      </div>
+    );
+  }
+
+  if (!pool.tiersSubmittedAt) {
+    return (
+      <div className="empty-state">
+        <span className="empty-state-icon">⛳</span>
+        <p style={{ fontWeight: 700 }}>Tiers not finalized yet</p>
+        <p className="muted small">
+          The commissioner is setting up the tiers. Drafting opens once they&apos;re submitted.
         </p>
       </div>
     );
@@ -552,6 +564,205 @@ function MembersTab({
 }
 
 // ---------------------------------------------------------------------------
+// Tab: Tiers
+// ---------------------------------------------------------------------------
+
+type TournamentImportPayload = {
+  tournament: Tournament;
+  golfers: Golfer[];
+};
+
+function buildTiersFromCounts(currentTiers: Tier[], newGolfers: Golfer[]): Tier[] {
+  const ordered = [...newGolfers].sort((a, b) => b.impliedProbability - a.impliedProbability);
+  let start = 0;
+  return currentTiers.map((tier, i) => {
+    const isLast = i === currentTiers.length - 1;
+    const count = isLast ? ordered.length - start : tier.golferIds.length;
+    const end = Math.min(start + count, ordered.length);
+    const golferIds = ordered.slice(start, end).map((g) => g.id);
+    start = end;
+    return { ...tier, golferIds };
+  });
+}
+
+function TiersTab({
+  currentPool,
+  tournament,
+  golferMap,
+  isAdmin,
+}: {
+  currentPool: Pool;
+  tournament: Tournament;
+  golferMap: Map<string, Golfer>;
+  isAdmin: boolean;
+}) {
+  const { updatePoolTiers, submitTiers, importTournamentFeed } = useAppState();
+  const tiersSubmitted = Boolean(currentPool.tiersSubmittedAt);
+  const [localTiers, setLocalTiers] = useState<Tier[]>(currentPool.tiers);
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isDirty) {
+      setLocalTiers(currentPool.tiers);
+    }
+  }, [currentPool.tiers, isDirty]);
+
+  function handleTierMove(golferId: string, nextTierId: string) {
+    setLocalTiers((prev) => {
+      const next = prev.map((tier) => ({
+        ...tier,
+        golferIds: tier.golferIds.filter((id) => id !== golferId),
+      }));
+      const target = next.find((t) => t.id === nextTierId);
+      if (target) target.golferIds = [...target.golferIds, golferId];
+      return next;
+    });
+    setIsDirty(true);
+    setMessage(null);
+  }
+
+  async function handleSaveTiers() {
+    setIsSaving(true);
+    setMessage(null);
+    try {
+      await updatePoolTiers(currentPool.id, localTiers);
+      setIsDirty(false);
+      setMessage("Tiers saved.");
+    } catch {
+      setMessage("Failed to save tiers.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRefreshOdds() {
+    if (!tournament.id.startsWith("dk-")) {
+      setMessage("Odds refresh is only available for DraftKings tournaments.");
+      return;
+    }
+    const slug = tournament.id.slice(3);
+    const leagueId = tournament.importMeta?.leagueId;
+    setIsRefreshing(true);
+    setMessage(null);
+    try {
+      const params = new URLSearchParams();
+      if (leagueId) params.set("leagueId", String(leagueId));
+      const res = await fetch(`/api/draftkings/tournament/${slug}${params.size ? `?${params.toString()}` : ""}`);
+      const payload = (await res.json()) as Partial<TournamentImportPayload> & { error?: string };
+      if (!res.ok || !payload.tournament || !payload.golfers) {
+        throw new Error(payload.error ?? "Failed to refresh odds.");
+      }
+      await importTournamentFeed(payload.tournament, payload.golfers);
+      const newTiers = buildTiersFromCounts(localTiers, payload.golfers);
+      setLocalTiers(newTiers);
+      setIsDirty(true);
+      setMessage(`Odds refreshed — ${payload.golfers.length} golfers updated. Save or submit tiers to keep changes.`);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Failed to refresh odds.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  async function handleSubmitTiers() {
+    setIsSubmitting(true);
+    setMessage(null);
+    try {
+      if (isDirty) await updatePoolTiers(currentPool.id, localTiers);
+      await submitTiers(currentPool.id);
+      setIsDirty(false);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Failed to submit tiers.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const busy = isSaving || isRefreshing || isSubmitting;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {tiersSubmitted ? (
+        <div className="notice">
+          <p><strong>Tiers locked</strong> — drafting is open for all members.</p>
+        </div>
+      ) : isAdmin ? (
+        <div className="notice">
+          <p>Review and adjust tier assignments below, then <strong>Submit Tiers</strong> to open drafting.</p>
+        </div>
+      ) : (
+        <div className="notice">
+          <p>The commissioner is finalizing tiers. Drafting opens once submitted.</p>
+        </div>
+      )}
+
+      <div className="tier-preview">
+        {localTiers.map((tier) => (
+          <div className="tier-card" key={tier.id}>
+            <p>{tier.label}</p>
+            {tier.golferIds.map((gid) => {
+              const golfer = golferMap.get(gid);
+              if (!golfer) return null;
+              return (
+                <div className="tier-golfer commissioner-golfer" key={golfer.id}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <strong style={{ fontSize: "0.85rem" }}>{golfer.name}</strong>
+                    <span className="muted small" style={{ display: "block", marginTop: 2 }}>
+                      {golfer.oddsAmerican > 0 ? `+${golfer.oddsAmerican}` : golfer.oddsAmerican}
+                      {" "}· {(golfer.impliedProbability * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  {isAdmin && !tiersSubmitted && (
+                    <select
+                      value={tier.id}
+                      onChange={(e) => handleTierMove(golfer.id, e.target.value)}
+                      disabled={busy}
+                      style={{
+                        border: "1px solid var(--line)",
+                        borderRadius: 10,
+                        padding: "4px 8px",
+                        fontSize: "0.8rem",
+                        background: "white",
+                      }}
+                    >
+                      {localTiers.map((t) => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {isAdmin && !tiersSubmitted && (
+        <div className="draft-actions">
+          <button className="secondary-button small-button" onClick={handleRefreshOdds} disabled={busy} type="button">
+            {isRefreshing ? "Refreshing…" : "↻ Refresh Odds"}
+          </button>
+          {isDirty && (
+            <button className="secondary-button small-button" onClick={handleSaveTiers} disabled={busy} type="button">
+              {isSaving ? "Saving…" : "Save Tiers"}
+            </button>
+          )}
+          <button className="primary-button small-button" onClick={handleSubmitTiers} disabled={busy} type="button">
+            {isSubmitting ? "Submitting…" : "Submit Tiers"}
+          </button>
+        </div>
+      )}
+
+      {message && <p className="muted small">{message}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tab: Admin controls
 // ---------------------------------------------------------------------------
 
@@ -570,19 +781,9 @@ function AdminTab({
   scoresLastSyncedAt: string | null;
   onScoresSynced: (ts: string) => void;
 }) {
-  const { updatePoolTiers, refreshGolfers } = useAppState();
+  const { refreshGolfers } = useAppState();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-
-  function handleTierMove(golferId: string, nextTierId: string) {
-    const nextTiers = currentPool.tiers.map((tier) => ({
-      ...tier,
-      golferIds: tier.golferIds.filter((id) => id !== golferId),
-    }));
-    const target = nextTiers.find((t) => t.id === nextTierId);
-    if (target) target.golferIds = [...target.golferIds, golferId];
-    void updatePoolTiers(currentPool.id, nextTiers);
-  }
 
   async function handleSyncScores() {
     setIsSyncing(true);
@@ -648,67 +849,6 @@ function AdminTab({
         </div>
         {syncMessage && <p className="muted small">{syncMessage}</p>}
       </div>
-
-      {/* Tier editor (only before lock) */}
-      {!isLocked && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <p
-            style={{
-              fontSize: "0.75rem",
-              fontWeight: 800,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--muted)",
-            }}
-          >
-            Tier Assignments
-          </p>
-          <div className="tier-preview">
-            {currentPool.tiers.map((tier) => (
-              <div className="tier-card" key={tier.id}>
-                <p>{tier.label}</p>
-                {tier.golferIds.map((gid) => {
-                  const golfer = golferMap.get(gid);
-                  if (!golfer) return null;
-                  return (
-                    <div className="tier-golfer commissioner-golfer" key={golfer.id}>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <strong style={{ fontSize: "0.85rem" }}>{golfer.name}</strong>
-                        <span
-                          className="muted small"
-                          style={{ display: "block", marginTop: 2 }}
-                        >
-                          {golfer.oddsAmerican > 0
-                            ? `+${golfer.oddsAmerican}`
-                            : golfer.oddsAmerican}{" "}
-                          • {(golfer.impliedProbability * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                      <select
-                        value={tier.id}
-                        onChange={(e) => handleTierMove(golfer.id, e.target.value)}
-                        style={{
-                          border: "1px solid var(--line)",
-                          borderRadius: 10,
-                          padding: "4px 8px",
-                          fontSize: "0.8rem",
-                          background: "white",
-                        }}
-                      >
-                        {currentPool.tiers.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Danger zone — delete tournament */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
@@ -1159,6 +1299,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
 
   const tabs: { id: TabId; label: string; badge?: number }[] = [
     { id: "picks", label: "My Picks" },
+    { id: "tiers", label: "Tiers" },
     { id: "leaderboard", label: "Leaderboard", badge: leaderboard.length || undefined },
     ...(submittedEntries.length > 0
       ? [{ id: "analytics" as TabId, label: "Analytics" }]
@@ -1251,6 +1392,15 @@ export function PoolPage({ poolId }: { poolId: string }) {
             isMember={isMember}
             existingEntry={existingEntry ?? null}
             currentUser={currentUser}
+          />
+        )}
+
+        {activeTab === "tiers" && (
+          <TiersTab
+            currentPool={currentPool}
+            tournament={currentTournament}
+            golferMap={golferMap}
+            isAdmin={isAdmin}
           />
         )}
 

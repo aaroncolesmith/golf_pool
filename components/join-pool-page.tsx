@@ -89,7 +89,7 @@ export function JoinPoolPage({ code }: { code: string }) {
       <div className="join-card">
         {/* Card header */}
         <div className="join-card-header">
-          <p className="eyebrow" style={{ marginBottom: 8 }}>Golf Pool invite</p>
+          <p className="eyebrow" style={{ marginBottom: 8 }}>GolfPool invite</p>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h1 style={{ fontSize: "1.5rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
               Join with code

@@ -4,8 +4,12 @@ import { AppProvider } from "@/components/app-provider";
 import { ErrorBoundary } from "@/components/error-boundary";
 
 export const metadata: Metadata = {
-  title: "Golf Pool Weekly",
+  title: "GolfPool",
   description: "Build and run PGA golf pools with tiered golfer drafting and live leaderboard tracking.",
+  icons: {
+    icon: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({
