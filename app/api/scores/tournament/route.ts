@@ -120,7 +120,7 @@ function findBestEvent(events: EspnEvent[], tournamentName: string): EspnEvent |
   }
 
   if (bestEvent && bestScore > 0) return bestEvent;
-  return events[0] ?? null;
+  return null;
 }
 
 function parseRoundScore(value: number | string | undefined): number | null {
@@ -185,7 +185,7 @@ export async function GET(request: Request) {
 
   if (!event) {
     return NextResponse.json(
-      { ok: false, error: "No matching event found on ESPN for this tournament." },
+      { ok: false, error: "Tournament leaderboard not yet available. Check back once the tournament begins." },
       { status: 404 },
     );
   }

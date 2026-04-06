@@ -1259,6 +1259,8 @@ export function PoolPage({ poolId }: { poolId: string }) {
   const [golferMap, setGolferMap] = useState<Map<string, Golfer>>(new Map());
   const [localSyncedAt, setLocalSyncedAt] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("picks");
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   useEffect(() => {
     const storeGolfers = state.golfers.filter(
@@ -1447,9 +1449,13 @@ export function PoolPage({ poolId }: { poolId: string }) {
             <span className="pill" style={{ fontSize: "0.8rem" }}>
               {currentPool.joinCode}
             </span>
-            <Link className="secondary-button small-button" href={poolSharePath(currentPool)}>
+            <button
+              className="secondary-button small-button"
+              type="button"
+              onClick={() => { setShowShareModal(true); setShareCopied(false); }}
+            >
               Share
-            </Link>
+            </button>
           </div>
         </div>
 
@@ -1558,6 +1564,75 @@ export function PoolPage({ poolId }: { poolId: string }) {
           />
         )}
       </div>
+
+      {/* ── Share modal ─────────────────────────────────────────────────── */}
+      {showShareModal && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowShareModal(false)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--surface, #fff)", borderRadius: 16, padding: 28,
+              width: "min(420px, 92vw)", display: "flex", flexDirection: "column", gap: 16,
+              boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 800, margin: 0 }}>Invite friends</h3>
+              <button
+                type="button"
+                onClick={() => setShowShareModal(false)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1.2rem", color: "var(--muted)", lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="muted small" style={{ margin: 0 }}>
+              Share this link — anyone with it can join <strong>{currentPool.name}</strong>.
+            </p>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                readOnly
+                value={`${typeof window !== "undefined" ? window.location.origin : ""}${poolSharePath(currentPool)}`}
+                style={{
+                  flex: 1, padding: "8px 12px", borderRadius: 10, border: "1px solid var(--line)",
+                  fontSize: "0.85rem", background: "var(--bg, #f7f8fa)", color: "var(--text)",
+                  minWidth: 0,
+                }}
+                onFocus={(e) => e.target.select()}
+              />
+              <button
+                type="button"
+                className="primary-button small-button"
+                onClick={() => {
+                  const url = `${window.location.origin}${poolSharePath(currentPool)}`;
+                  void navigator.clipboard.writeText(url).then(() => {
+                    setShareCopied(true);
+                    setTimeout(() => setShareCopied(false), 2500);
+                  });
+                }}
+              >
+                {shareCopied ? "Copied ✓" : "Copy"}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="muted small">Join code:</span>
+              <span className="pill" style={{ fontSize: "0.8rem", fontWeight: 700 }}>{currentPool.joinCode}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
