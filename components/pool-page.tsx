@@ -572,16 +572,40 @@ type TournamentImportPayload = {
   golfers: Golfer[];
 };
 
-function buildTiersFromCounts(currentTiers: Tier[], newGolfers: Golfer[]): Tier[] {
-  const ordered = [...newGolfers].sort((a, b) => b.impliedProbability - a.impliedProbability);
+const DEFAULT_TIER_SPLITS = [0.05, 0.1, 0.1, 0.15, 0.15];
+
+function buildDefaultBoundaries(totalGolfers: number) {
+  const boundaries: number[] = [];
+  let runningCount = 0;
+  DEFAULT_TIER_SPLITS.forEach((split, index) => {
+    const remainingPlayers = totalGolfers - runningCount;
+    const tiersRemainingAfterCurrent = DEFAULT_TIER_SPLITS.length - index;
+    const targetCount = Math.round(totalGolfers * split);
+    const maxCount = Math.max(1, remainingPlayers - tiersRemainingAfterCurrent);
+    const tierCount = Math.max(1, Math.min(maxCount, targetCount));
+    runningCount += tierCount;
+    boundaries.push(runningCount);
+  });
+  return boundaries;
+}
+
+function getTierBoundaries(tiers: Tier[]) {
+  const boundaries: number[] = [];
+  let runningCount = 0;
+  tiers.slice(0, -1).forEach((tier) => {
+    runningCount += tier.golferIds.length;
+    boundaries.push(runningCount);
+  });
+  return boundaries;
+}
+
+function buildTiersFromBoundaries(orderedGolfers: Golfer[], boundaries: number[]): Tier[] {
+  const slices = [...boundaries, orderedGolfers.length];
   let start = 0;
-  return currentTiers.map((tier, i) => {
-    const isLast = i === currentTiers.length - 1;
-    const count = isLast ? ordered.length - start : tier.golferIds.length;
-    const end = Math.min(start + count, ordered.length);
-    const golferIds = ordered.slice(start, end).map((g) => g.id);
+  return slices.map((end, index) => {
+    const golferIds = orderedGolfers.slice(start, end).map((g) => g.id);
     start = end;
-    return { ...tier, golferIds };
+    return { id: `tier-${index + 1}`, label: `Tier ${index + 1}`, golferIds };
   });
 }
 
@@ -604,23 +628,59 @@ function TiersTab({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const railRef = useRef<HTMLDivElement | null>(null);
+
+  // Golfers sorted by implied probability descending (same order as wizard)
+  const orderedGolfers = useMemo(
+    () => Array.from(golferMap.values()).sort((a, b) => b.impliedProbability - a.impliedProbability),
+    [golferMap],
+  );
+
+  const tierBoundaries = useMemo(() => getTierBoundaries(localTiers), [localTiers]);
 
   useEffect(() => {
-    if (!isDirty) {
-      setLocalTiers(currentPool.tiers);
-    }
+    if (!isDirty) setLocalTiers(currentPool.tiers);
   }, [currentPool.tiers, isDirty]);
 
-  function handleTierMove(golferId: string, nextTierId: string) {
-    setLocalTiers((prev) => {
-      const next = prev.map((tier) => ({
-        ...tier,
-        golferIds: tier.golferIds.filter((id) => id !== golferId),
-      }));
-      const target = next.find((t) => t.id === nextTierId);
-      if (target) target.golferIds = [...target.golferIds, golferId];
-      return next;
-    });
+  // --- Slider drag logic (ported from wizard) ---
+  function handleBoundaryChange(boundaryIndex: number, nextValue: number) {
+    const currentBoundaries = getTierBoundaries(localTiers);
+    const min = boundaryIndex === 0 ? 1 : currentBoundaries[boundaryIndex - 1] + 1;
+    const max =
+      boundaryIndex === currentBoundaries.length - 1
+        ? orderedGolfers.length - 1
+        : currentBoundaries[boundaryIndex + 1] - 1;
+    const clamped = Math.max(min, Math.min(max, nextValue));
+    const nextBoundaries = [...currentBoundaries];
+    nextBoundaries[boundaryIndex] = clamped;
+    setLocalTiers(buildTiersFromBoundaries(orderedGolfers, nextBoundaries));
+    setIsDirty(true);
+    setMessage(null);
+  }
+
+  function handleBoundaryPointerDown(boundaryIndex: number, clientX: number) {
+    const rail = railRef.current;
+    if (!rail || orderedGolfers.length === 0) return;
+    const rect = rail.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    const nextValue = Math.round(Math.max(0, Math.min(1, ratio)) * orderedGolfers.length);
+    handleBoundaryChange(boundaryIndex, nextValue);
+  }
+
+  function startBoundaryDrag(boundaryIndex: number, event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const onMove = (e: PointerEvent) => handleBoundaryPointerDown(boundaryIndex, e.clientX);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    handleBoundaryPointerDown(boundaryIndex, event.clientX);
+  }
+
+  function handleResetTiers() {
+    setLocalTiers(buildTiersFromBoundaries(orderedGolfers, buildDefaultBoundaries(orderedGolfers.length)));
     setIsDirty(true);
     setMessage(null);
   }
@@ -657,7 +717,9 @@ function TiersTab({
         throw new Error(payload.error ?? "Failed to refresh odds.");
       }
       await importTournamentFeed(payload.tournament, payload.golfers);
-      const newTiers = buildTiersFromCounts(localTiers, payload.golfers);
+      // Rebuild tiers from refreshed golfer list, preserving current boundaries
+      const newOrdered = [...payload.golfers].sort((a, b) => b.impliedProbability - a.impliedProbability);
+      const newTiers = buildTiersFromBoundaries(newOrdered, getTierBoundaries(localTiers));
       setLocalTiers(newTiers);
       setIsDirty(true);
       setMessage(`Odds refreshed — ${payload.golfers.length} golfers updated. Save or submit tiers to keep changes.`);
@@ -684,80 +746,125 @@ function TiersTab({
 
   const busy = isSaving || isRefreshing || isSubmitting;
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {tiersSubmitted ? (
-        <div className="notice">
-          <p><strong>Tiers locked</strong> — drafting is open for all members.</p>
+  // --- Locked / non-admin: simple read-only card grid ---
+  if (tiersSubmitted || !isAdmin) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {tiersSubmitted ? (
+          <div className="notice"><p><strong>Tiers locked</strong> — drafting is open for all members.</p></div>
+        ) : (
+          <div className="notice"><p>The commissioner is finalizing tiers. Drafting opens once submitted.</p></div>
+        )}
+        <div className="tier-board full-tier-board">
+          {localTiers.map((tier) => (
+            <div className="tier-column expanded-tier-column" key={tier.id}>
+              <div className="tier-column-head">
+                <p>{tier.label}</p>
+                <span>{tier.golferIds.length} pl.</span>
+              </div>
+              <div className="tier-column-list">
+                {tier.golferIds.map((gid) => {
+                  const golfer = golferMap.get(gid);
+                  if (!golfer) return null;
+                  return (
+                    <div className="tier-player-row" key={gid}>
+                      <strong>{golfer.name}</strong>
+                      <div className="tier-player-meta">
+                        <span>{golfer.oddsAmerican > 0 ? `+${golfer.oddsAmerican}` : golfer.oddsAmerican}</span>
+                        <span>{(golfer.impliedProbability * 100).toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
-      ) : isAdmin ? (
-        <div className="notice">
-          <p>Review and adjust tier assignments below, then <strong>Submit Tiers</strong> to open drafting.</p>
-        </div>
-      ) : (
-        <div className="notice">
-          <p>The commissioner is finalizing tiers. Drafting opens once submitted.</p>
-        </div>
-      )}
-
-      <div className="tier-preview">
-        {localTiers.map((tier) => (
-          <div className="tier-card" key={tier.id}>
-            <p>{tier.label}</p>
-            {tier.golferIds.map((gid) => {
-              const golfer = golferMap.get(gid);
-              if (!golfer) return null;
-              return (
-                <div className="tier-golfer commissioner-golfer" key={golfer.id}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <strong style={{ fontSize: "0.85rem" }}>{golfer.name}</strong>
-                    <span className="muted small" style={{ display: "block", marginTop: 2 }}>
-                      {golfer.oddsAmerican > 0 ? `+${golfer.oddsAmerican}` : golfer.oddsAmerican}
-                      {" "}· {(golfer.impliedProbability * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                  {isAdmin && !tiersSubmitted && (
-                    <select
-                      value={tier.id}
-                      onChange={(e) => handleTierMove(golfer.id, e.target.value)}
-                      disabled={busy}
-                      style={{
-                        border: "1px solid var(--line)",
-                        borderRadius: 10,
-                        padding: "4px 8px",
-                        fontSize: "0.8rem",
-                        background: "white",
-                      }}
-                    >
-                      {localTiers.map((t) => (
-                        <option key={t.id} value={t.id}>{t.label}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ))}
       </div>
+    );
+  }
 
-      {isAdmin && !tiersSubmitted && (
-        <div className="draft-actions">
-          <button className="secondary-button small-button" onClick={handleRefreshOdds} disabled={busy} type="button">
-            {isRefreshing ? "Refreshing…" : "↻ Refresh Odds"}
-          </button>
-          {isDirty && (
-            <button className="secondary-button small-button" onClick={handleSaveTiers} disabled={busy} type="button">
-              {isSaving ? "Saving…" : "Save Tiers"}
+  // --- Admin edit view: slider + full tier board ---
+  return (
+    <div className="wizard-stage-card tier-editor-shell">
+      <div className="tier-editor-card">
+        <div className="tier-toolbar">
+          <h2>Draft Tier Configuration</h2>
+          <div className="draft-actions">
+            <button className="secondary-button" type="button" onClick={handleResetTiers} disabled={busy}>
+              Reset Tiers
             </button>
-          )}
-          <button className="primary-button small-button" onClick={handleSubmitTiers} disabled={busy} type="button">
-            {isSubmitting ? "Submitting…" : "Submit Tiers"}
-          </button>
+            <button className="secondary-button small-button" onClick={handleRefreshOdds} disabled={busy} type="button">
+              {isRefreshing ? "Refreshing…" : "↻ Refresh Odds"}
+            </button>
+            {isDirty && (
+              <button className="secondary-button small-button" onClick={handleSaveTiers} disabled={busy} type="button">
+                {isSaving ? "Saving…" : "Save"}
+              </button>
+            )}
+            <button className="primary-button" onClick={handleSubmitTiers} disabled={busy} type="button">
+              {isSubmitting ? "Submitting…" : "Submit Tiers"}
+            </button>
+          </div>
         </div>
-      )}
 
-      {message && <p className="muted small">{message}</p>}
+        {message && <p className="muted small" style={{ marginTop: 4 }}>{message}</p>}
+
+        <div className="tier-slider-panel">
+          <div className="tier-slider-meta">
+            {localTiers.map((tier) => (
+              <div className="tier-slider-label" key={tier.id}>
+                <span>{tier.label}</span>
+                <strong>
+                  {orderedGolfers.length
+                    ? `${Math.round((tier.golferIds.length / orderedGolfers.length) * 100)}% (${tier.golferIds.length})`
+                    : "0% (0)"}
+                </strong>
+              </div>
+            ))}
+          </div>
+          <div className="tier-slider-controls" ref={railRef}>
+            <div className="tier-slider-rail" />
+            {tierBoundaries.map((boundary, index) => (
+              <button
+                aria-label={`Adjust ${localTiers[index].label} boundary`}
+                className="tier-slider-handle"
+                key={localTiers[index].id}
+                onPointerDown={(e) => startBoundaryDrag(index, e)}
+                style={{ left: `calc(${(boundary / orderedGolfers.length) * 100}% - 8px)` }}
+                type="button"
+                disabled={busy}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="tier-board full-tier-board">
+          {localTiers.map((tier) => (
+            <div className="tier-column expanded-tier-column" key={tier.id}>
+              <div className="tier-column-head">
+                <p>{tier.label}</p>
+                <span>{tier.golferIds.length} pl.</span>
+              </div>
+              <div className="tier-column-list">
+                {tier.golferIds.map((gid) => {
+                  const golfer = golferMap.get(gid);
+                  if (!golfer) return null;
+                  return (
+                    <div className="tier-player-row" key={gid}>
+                      <strong>{golfer.name}</strong>
+                      <div className="tier-player-meta">
+                        <span>{golfer.oddsAmerican > 0 ? `+${golfer.oddsAmerican}` : golfer.oddsAmerican}</span>
+                        <span>{(golfer.impliedProbability * 100).toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
