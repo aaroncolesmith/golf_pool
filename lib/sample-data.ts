@@ -102,6 +102,7 @@ export const samplePools: Pool[] = [
     createdAt: "2026-03-24T12:00:00.000Z",
     lockAt: "2026-04-09T11:45:00.000Z",
     tiers: defaultTiers,
+    tiersSubmittedAt: null,
   },
 ];
 
