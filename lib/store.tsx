@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { isPoolLocked, validateSelections } from "@/lib/pool";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -142,12 +142,15 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [isReady, setIsReady] = useState(false);
+  const hasLoadedOnce = useRef(false);
 
   // -------------------------------------------------------------------------
   // Core data loader — fetches everything the current user can see
   // -------------------------------------------------------------------------
   const loadState = useCallback(async () => {
-    setIsReady(false);
+    // Only show the loading screen on the very first load.
+    // Subsequent reloads (e.g. after sign-in) update state silently.
+    if (!hasLoadedOnce.current) setIsReady(false);
 
     const supabase = await getSupabaseBrowserClient();
 
@@ -229,6 +232,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       scoresLastSyncedAt,
     });
 
+    hasLoadedOnce.current = true;
     setIsReady(true);
   }, []);
 
@@ -241,8 +245,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let subscription: { unsubscribe: () => void } | null = null;
 
     void getSupabaseBrowserClient().then((supabase) => {
-      const { data } = supabase.auth.onAuthStateChange(() => {
-        void loadState();
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        // TOKEN_REFRESHED fires on tab focus — ignore it, no data has changed.
+        // INITIAL_SESSION is handled by the direct loadState() call above.
+        if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+          void loadState();
+        }
       });
       subscription = data.subscription;
     });
