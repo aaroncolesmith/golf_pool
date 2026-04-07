@@ -218,22 +218,6 @@ function Dashboard() {
           <span style={{ fontSize: "0.65rem", fontWeight: 500, color: "var(--muted)", letterSpacing: "0.03em", marginLeft: 5 }}>v0.39</span>
         </div>
         <div className="nav-actions">
-          {/* Desktop create + join buttons */}
-          <div style={{ display: "flex", gap: 8 }} className="nav-desktop-actions">
-            <button
-              className="secondary-button small-button"
-              type="button"
-              onClick={() => {
-                setIsJoinOpen((v) => !v);
-                setJoinMessage(null);
-              }}
-            >
-              Join pool
-            </button>
-            <Link className="primary-button small-button" href="/create">
-              + Create
-            </Link>
-          </div>
           <span className="profile-badge" title={currentUser.userName}>
             {currentUser.userName.slice(0, 1).toUpperCase()}
           </span>
@@ -252,7 +236,17 @@ function Dashboard() {
           </p>
         </div>
         {/* Mobile-only action row */}
-        <div className="dashboard-actions" style={{ flexShrink: 0 }}>
+        <div className="dashboard-actions" style={{ flexShrink: 0, display: "flex", gap: 8 }}>
+          <button
+            className="secondary-button small-button"
+            type="button"
+            onClick={() => {
+              setIsJoinOpen((v) => !v);
+              setJoinMessage(null);
+            }}
+          >
+            Join Pool
+          </button>
           <Link className="primary-button small-button" href="/create">
             + New
           </Link>
@@ -387,41 +381,6 @@ function Dashboard() {
         </div>
       </footer>
 
-      {/* ── Mobile bottom nav ─────────────────────────────────────────────── */}
-      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-        <div className="mobile-bottom-nav-inner">
-          <span
-            className="mobile-nav-item active"
-            aria-current="page"
-          >
-            <span className="mobile-nav-icon">⛳</span>
-            Pools
-          </span>
-          <Link className="mobile-nav-item" href="/create">
-            <span className="mobile-nav-icon">＋</span>
-            Create
-          </Link>
-          <button
-            className="mobile-nav-item"
-            type="button"
-            onClick={() => {
-              setIsJoinOpen((v) => !v);
-              setJoinMessage(null);
-            }}
-          >
-            <span className="mobile-nav-icon">🔗</span>
-            Join
-          </button>
-          <button
-            className="mobile-nav-item"
-            type="button"
-            onClick={logout}
-          >
-            <span className="mobile-nav-icon">👤</span>
-            Account
-          </button>
-        </div>
-      </nav>
     </main>
   );
 }
