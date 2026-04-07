@@ -7,8 +7,13 @@ export const metadata: Metadata = {
   title: "GolfPool",
   description: "Build and run PGA golf pools with tiered golfer drafting and live leaderboard tracking.",
   icons: {
-    icon: "/icon.png",
-    apple: "/icon.png",
+    icon: "/golf_pool_image.png",
+    apple: "/golf_pool_image.png",
+  },
+  openGraph: {
+    title: "GolfPool",
+    description: "Build and run PGA golf pools with tiered golfer drafting and live leaderboard tracking.",
+    images: [{ url: "/golf_pool_image.png" }],
   },
 };
 
