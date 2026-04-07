@@ -6,6 +6,15 @@ import { ErrorBoundary } from "@/components/error-boundary";
 export const metadata: Metadata = {
   title: "Golf Pool Weekly",
   description: "Build and run PGA golf pools with tiered golfer drafting and live leaderboard tracking.",
+  icons: {
+    icon: "/golf_pool_image.png",
+    apple: "/golf_pool_image.png",
+  },
+  openGraph: {
+    title: "Golf Pool Weekly",
+    description: "Build and run PGA golf pools with tiered golfer drafting and live leaderboard tracking.",
+    images: [{ url: "/golf_pool_image.png" }],
+  },
 };
 
 export default function RootLayout({

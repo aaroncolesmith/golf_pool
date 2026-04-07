@@ -213,6 +213,7 @@ function Dashboard() {
       {/* ── Top nav ───────────────────────────────────────────────────────── */}
       <nav className="dashboard-nav">
         <div className="brand-lockup">
+          <img src="/golf_pool_image.png" alt="GolfPool logo" style={{ height: 36, width: "auto" }} />
           <strong>GolfPool</strong>
         </div>
         <div className="nav-actions">

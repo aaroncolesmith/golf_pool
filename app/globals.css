@@ -301,6 +301,12 @@ button:disabled {
   -webkit-backdrop-filter: blur(12px);
 }
 
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .brand-lockup strong {
   font-size: 1.15rem;
   font-weight: 800;
