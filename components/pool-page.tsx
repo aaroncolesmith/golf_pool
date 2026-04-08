@@ -465,6 +465,7 @@ function LeaderboardTab({
           entries={entries}
           users={users}
           leaderboard={leaderboard}
+          isLocked={isLocked}
         />
       )}
     </div>
@@ -1025,12 +1026,14 @@ function TournamentLeaderboard({
   entries,
   users,
   leaderboard,
+  isLocked,
 }: {
   tournamentId: string;
   golferMap: Map<string, Golfer>;
   entries: PoolEntry[];
   users: { id: string; userName: string }[];
   leaderboard: ReturnType<typeof buildLeaderboard>;
+  isLocked: boolean;
 }) {
   const [golfers, setGolfers] = useState<TournamentGolferRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1206,7 +1209,7 @@ function TournamentLeaderboard({
                   {label}{sortIndicator(key)}
                 </th>
               ))}
-              <th className="tournament-lb-th">Teams</th>
+              {isLocked && <th className="tournament-lb-th">Teams</th>}
             </tr>
           </thead>
           <tbody>
@@ -1230,11 +1233,13 @@ function TournamentLeaderboard({
                   <td className="tournament-lb-td">{g.r2 ?? "—"}</td>
                   <td className="tournament-lb-td">{g.r3 ?? "—"}</td>
                   <td className="tournament-lb-td">{g.r4 ?? "—"}</td>
-                  <td className="tournament-lb-td tournament-lb-teams">
-                    {teams.map((team) => (
-                      <span key={team} className="tournament-lb-team-badge">{team}</span>
-                    ))}
-                  </td>
+                  {isLocked && (
+                    <td className="tournament-lb-td tournament-lb-teams">
+                      {teams.map((team) => (
+                        <span key={team} className="tournament-lb-team-badge">{team}</span>
+                      ))}
+                    </td>
+                  )}
                 </tr>
               );
             })}
