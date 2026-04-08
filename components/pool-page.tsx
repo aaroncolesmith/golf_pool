@@ -1410,7 +1410,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
     { id: "picks", label: "My Picks" },
     { id: "tiers", label: "Tiers" },
     { id: "leaderboard", label: "Leaderboard", badge: leaderboard.length || undefined },
-    ...(submittedEntries.length > 0
+    ...(isLocked && submittedEntries.length > 0
       ? [{ id: "analytics" as TabId, label: "Analytics" }]
       : []),
     { id: "members", label: "Members", badge: memberUsers.length || undefined },
