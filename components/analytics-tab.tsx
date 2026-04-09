@@ -216,6 +216,9 @@ function GolferTooltip({
       </p>
       <p style={{ color: "#667487", marginBottom: 2 }}>
         {p.ownership} team{p.ownership !== 1 ? "s" : ""} ({Math.round(p.ownershipPct * 100)}%)
+        {p.impliedProbability > 0 && (
+          <span style={{ marginLeft: 6 }}>· DK {(p.impliedProbability * 100).toFixed(1)}%</span>
+        )}
       </p>
       <p style={{ color: "#667487", fontSize: 11 }}>
         {p.pickedByTeams.join(", ")}
@@ -375,7 +378,7 @@ function DataGolfSection({
                           : "#a84534",
                   }}
                 >
-                  • avg {Math.round(avgCut * 100)}% cut
+                  • avg {(avgCut * 100).toFixed(1)}% cut
                 </span>
               </span>
             </div>
@@ -404,10 +407,10 @@ function DataGolfSection({
                         className={cutBadgeClass(dg.cut)}
                         title="Make cut %"
                       >
-                        {Math.round(dg.cut * 100)}%
+                        {(dg.cut * 100).toFixed(1)}%
                       </span>
                       <span className="dg-badge dg-badge-top5" title="Top 5 %">
-                        T5: {Math.round(dg.top5 * 100)}%
+                        T5: {(dg.top5 * 100).toFixed(1)}%
                       </span>
                     </div>
                   ) : (
