@@ -1547,6 +1547,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
             pool={currentPool}
             golferMap={golferMap}
             users={state.users}
+            tournament={currentTournament}
           />
         )}
 
