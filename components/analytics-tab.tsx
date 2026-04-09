@@ -68,7 +68,7 @@ function scoreStr(score: number | null, eliminated?: boolean): string {
 
 function pctStr(p: number | null): string {
   if (p === null) return "—";
-  return `${Math.round(p * 100)}%`;
+  return `${(p * 100).toFixed(1)}%`;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +218,9 @@ function GolferTooltip({
       </p>
       <p style={{ color: "#667487", marginBottom: 2 }}>
         {p.ownership} team{p.ownership !== 1 ? "s" : ""} ({Math.round(p.ownershipPct * 100)}%)
+        {p.impliedProbability > 0 && (
+          <span style={{ marginLeft: 6 }}>· DK {(p.impliedProbability * 100).toFixed(1)}%</span>
+        )}
       </p>
       <p style={{ color: "#667487", fontSize: 11 }}>
         {p.pickedByTeams.join(", ")}

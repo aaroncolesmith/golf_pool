@@ -40,8 +40,10 @@ type EspnStatusType = {
 };
 
 type EspnLinescore = {
-  period?: { number: number };
-  value: number | string;
+  period?: number; // round number (1-based) — direct number in current ESPN API
+  value?: number | string;
+  displayValue?: string;
+  linescores?: EspnLinescore[]; // per-hole scores nested inside each round's linescore
 };
 
 type EspnCompetitor = {
@@ -210,37 +212,30 @@ export async function GET(request: Request) {
     const madeCut = !isCutLike;
     const scoreToParInt = isCutLike ? 0 : parseScoreToPar(scoreValue);
 
-    // Per-round stroke counts, indexed by period number (1-based)
+    // Per-round stroke counts, indexed by round number (1-based).
+    // ESPN now returns period as a direct number on each linescore.
+    const currentPeriod = competitionStatus?.period ?? 1;
     const roundScores: Record<number, number | null> = {};
     if (c.linescores) {
       for (const ls of c.linescores) {
-        const period = ls.period?.number;
+        const period = ls.period;
         if (period !== undefined) {
           roundScores[period] = parseRoundScore(ls.value);
-        } else {
-          // Linescores without period: assign sequentially
-          const nextIdx = Object.keys(roundScores).length + 1;
-          roundScores[nextIdx] = parseRoundScore(ls.value);
         }
       }
     }
 
-    // Thru: parse competitor status detail into a clean display value
-    // ESPN detail examples: "Thru 14", "F", "F*72", "8:11 AM ET", "-"
-    const rawDetail = c.status?.type?.detail ?? "";
+    // Thru: derive from the nested per-hole linescores inside the current round.
+    // ESPN now nests hole-by-hole scores under each round's top-level linescore.
+    // c.status?.type?.detail is no longer populated per-competitor in the current API.
     let thru = "-";
-    if (rawDetail) {
-      const thruMatch = rawDetail.match(/thru\s+(\d+\*?)/i);
-      if (thruMatch) {
-        // "Thru 14" → "14", "Thru 4*" → "4*"
-        thru = thruMatch[1];
-      } else if (/^F/i.test(rawDetail)) {
-        // "F", "F*72" → "F"
+    if (madeCut) {
+      const currentRoundLS = c.linescores?.find((ls) => ls.period === currentPeriod);
+      const holesCompleted = currentRoundLS?.linescores?.length ?? 0;
+      if (holesCompleted >= 18) {
         thru = "F";
-      } else {
-        // Tee time like "8:11 AM ET" → strip timezone suffix
-        const timeMatch = rawDetail.match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
-        thru = timeMatch ? timeMatch[1] : rawDetail;
+      } else if (holesCompleted > 0) {
+        thru = String(holesCompleted);
       }
     }
 
@@ -248,22 +243,18 @@ export async function GET(request: Request) {
     // Formula: today = totalTopar − sum of completed previous rounds' to-par
     // For PGA Tour events par is always 72 per round.
     const PAR_PER_ROUND = 72;
-    const currentPeriod = competitionStatus?.period ?? 1;
     let today: number | null = null;
 
-    if (madeCut) {
-      const hasStartedToday = thru !== "-" && !/^\d{1,2}:\d{2}/.test(thru);
-      if (hasStartedToday) {
-        // Sum raw strokes for all rounds BEFORE today
-        let completedTopar = 0;
-        for (let p = 1; p < currentPeriod; p++) {
-          const raw = roundScores[p];
-          if (raw !== null && raw !== undefined) {
-            completedTopar += raw - PAR_PER_ROUND;
-          }
+    if (madeCut && thru !== "-") {
+      // Sum raw strokes for all rounds BEFORE today
+      let completedTopar = 0;
+      for (let p = 1; p < currentPeriod; p++) {
+        const raw = roundScores[p];
+        if (raw !== null && raw !== undefined) {
+          completedTopar += raw - PAR_PER_ROUND;
         }
-        today = scoreToParInt - completedTopar;
       }
+      today = scoreToParInt - completedTopar;
     }
 
     // Position for cut players
