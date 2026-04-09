@@ -1072,6 +1072,9 @@ function TournamentLeaderboard({
   // Build a map from normalized golfer name → team names.
   // Also index by last name alone as a fallback.
   const golferNameToTeams = useMemo<Map<string, string[]>>(() => {
+    // Never build pick data into state before the pool locks — return an empty
+    // map so picks are never accessible via React devtools or accidental renders.
+    if (!isLocked) return new Map();
     const map = new Map<string, string[]>();
     const addEntry = (key: string, teamName: string) => {
       const existing = map.get(key) ?? [];
@@ -1089,7 +1092,7 @@ function TournamentLeaderboard({
       }
     }
     return map;
-  }, [leaderboard]);
+  }, [leaderboard, isLocked]);
 
   // Look up teams for an ESPN golfer name, with last-name fallback
   function teamsForGolfer(espnName: string): string[] {
@@ -1544,6 +1547,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
             pool={currentPool}
             golferMap={golferMap}
             users={state.users}
+            tournament={currentTournament}
           />
         )}
 
