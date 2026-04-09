@@ -686,7 +686,361 @@ function DraftKingsOddsSection({
 }
 
 // ---------------------------------------------------------------------------
-// 3. Ownership × Performance
+// 3. DataGolf model probabilities section
+// ---------------------------------------------------------------------------
+
+type DGGolfer = {
+  name: string;
+  cut: number;
+  top10: number;
+  top5: number;
+  win: number;
+};
+
+function lookupDG(
+  name: string,
+  dgMap: Map<string, DGGolfer>,
+): DGGolfer | undefined {
+  const norm = normalizeName(name);
+  if (dgMap.has(norm)) return dgMap.get(norm);
+  const lastName = norm.split(" ").at(-1) ?? "";
+  for (const [key, val] of dgMap) {
+    if (key.endsWith(` ${lastName}`) || key === lastName) return val;
+  }
+  return undefined;
+}
+
+function avgDGProb(
+  golfers: Golfer[],
+  dgMap: Map<string, DGGolfer>,
+  key: keyof Pick<DGGolfer, "cut" | "top10" | "top5" | "win">,
+): number | null {
+  const vals: number[] = [];
+  for (const g of golfers) {
+    const entry = lookupDG(g.name, dgMap);
+    if (entry !== undefined) vals.push(entry[key]);
+  }
+  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+function DataGolfSection({
+  leaderboard,
+  golferMap,
+  dgData,
+  dgLoading,
+  sortBy,
+  onSortChange,
+}: {
+  leaderboard: LeaderboardRow[];
+  golferMap: Map<string, Golfer>;
+  dgData: DGGolfer[] | null;
+  dgLoading: boolean;
+  sortBy: OddsSort;
+  onSortChange: (s: OddsSort) => void;
+}) {
+  const dgMap = useMemo(() => {
+    if (!dgData) return new Map<string, DGGolfer>();
+    return new Map(dgData.map((g) => [normalizeName(g.name), g]));
+  }, [dgData]);
+
+  const sortedRows = useMemo(() => {
+    const rows = leaderboard.filter((r) => r.status !== "eliminated");
+    if (!dgData) return rows;
+    return [...rows].sort((a, b) => {
+      const allA = [...a.countingGolfers, ...a.benchGolfers];
+      const allB = [...b.countingGolfers, ...b.benchGolfers];
+      const avgA = avgDGProb(allA, dgMap, sortBy) ?? -1;
+      const avgB = avgDGProb(allB, dgMap, sortBy) ?? -1;
+      return avgB - avgA;
+    });
+  }, [leaderboard, dgData, dgMap, sortBy]);
+
+  if (dgLoading) {
+    return (
+      <div className="analytics-unavailable">
+        <span
+          style={{
+            display: "inline-block",
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            border: "2px solid var(--primary)",
+            borderTopColor: "transparent",
+            animation: "spin 0.7s linear infinite",
+          }}
+        />
+        <span>Loading DataGolf model…</span>
+      </div>
+    );
+  }
+
+  if (!dgData) {
+    return (
+      <div className="analytics-unavailable">
+        <span>🔌</span>
+        <span>
+          DataGolf live model is only available during active tournament rounds.
+        </span>
+      </div>
+    );
+  }
+
+  const COLS: { key: OddsSort; label: string }[] = [
+    { key: "cut", label: "Cut" },
+    { key: "top10", label: "Top 10" },
+    { key: "top5", label: "Top 5" },
+    { key: "win", label: "Win" },
+  ];
+
+  return (
+    <div>
+      {/* Sort controls */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 14,
+          flexWrap: "wrap",
+        }}
+      >
+        <span
+          style={{
+            fontSize: "0.78rem",
+            fontWeight: 600,
+            color: "#667487",
+            marginRight: 2,
+          }}
+        >
+          Sort teams by:
+        </span>
+        {COLS.map((col) => (
+          <button
+            key={col.key}
+            type="button"
+            onClick={() => onSortChange(col.key)}
+            style={{
+              padding: "4px 12px",
+              borderRadius: 20,
+              border: "1px solid",
+              fontSize: "0.78rem",
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.15s",
+              borderColor: sortBy === col.key ? "var(--primary)" : "var(--line)",
+              background: sortBy === col.key ? "var(--primary-soft)" : "transparent",
+              color: sortBy === col.key ? "var(--primary)" : "var(--muted)",
+            }}
+          >
+            {col.label} %
+          </button>
+        ))}
+      </div>
+
+      {/* Team cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {sortedRows.map((row, rank) => {
+          const allGolfers = [...row.countingGolfers, ...row.benchGolfers];
+
+          const teamAvg: Record<OddsSort, number | null> = {
+            cut: avgDGProb(allGolfers, dgMap, "cut"),
+            top10: avgDGProb(allGolfers, dgMap, "top10"),
+            top5: avgDGProb(allGolfers, dgMap, "top5"),
+            win: avgDGProb(allGolfers, dgMap, "win"),
+          };
+
+          return (
+            <div
+              key={row.entryId}
+              style={{
+                background: "#f8fafd",
+                border: "1px solid var(--line)",
+                borderRadius: 14,
+                padding: "12px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 0,
+              }}
+            >
+              {/* Team header */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  paddingBottom: 10,
+                  marginBottom: 8,
+                  borderBottom: "1px solid var(--line)",
+                  flexWrap: "wrap",
+                  gap: 6,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: "50%",
+                      background: "var(--primary-soft)",
+                      color: "var(--primary)",
+                      fontSize: "0.68rem",
+                      fontWeight: 800,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {rank + 1}
+                  </span>
+                  <span
+                    style={{
+                      fontWeight: 800,
+                      fontSize: "0.9rem",
+                      letterSpacing: "-0.02em",
+                    }}
+                  >
+                    {row.teamName}
+                  </span>
+                  <span style={{ fontSize: "0.78rem", color: "#667487" }}>
+                    {scoreStr(row.teamScore)}
+                  </span>
+                </div>
+
+                {/* Team avg probabilities */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 14,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {COLS.map((col) => (
+                    <span
+                      key={col.key}
+                      style={{
+                        fontSize: "0.72rem",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 1,
+                      }}
+                    >
+                      <span style={{ color: "#9ca8b6", fontWeight: 600 }}>
+                        {col.label}
+                      </span>
+                      <span
+                        style={{
+                          color: probColor(teamAvg[col.key]),
+                          fontWeight: 800,
+                          fontSize: "0.82rem",
+                          textDecoration:
+                            col.key === sortBy ? "underline" : "none",
+                          textUnderlineOffset: 2,
+                        }}
+                      >
+                        {pctStr(teamAvg[col.key])}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Per-golfer table */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr repeat(4, 44px)",
+                  gap: "3px 4px",
+                  alignItems: "center",
+                }}
+              >
+                {/* Column headers */}
+                <span />
+                {COLS.map((col) => (
+                  <span
+                    key={col.key}
+                    style={{
+                      fontSize: "0.65rem",
+                      fontWeight: 700,
+                      color: col.key === sortBy ? "var(--primary)" : "#9ca8b6",
+                      textAlign: "right",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {col.label}
+                  </span>
+                ))}
+
+                {/* Golfer rows */}
+                {allGolfers.map((golfer) => {
+                  const isBench = row.benchGolfers.some(
+                    (g) => g.id === golfer.id,
+                  );
+                  const dg = lookupDG(golfer.name, dgMap);
+                  return (
+                    <>
+                      <span
+                        key={`name-${golfer.id}`}
+                        style={{
+                          fontSize: "0.82rem",
+                          fontWeight: isBench ? 400 : 600,
+                          color: !golfer.madeCut
+                            ? "#9ca8b6"
+                            : isBench
+                              ? "#667487"
+                              : "var(--text)",
+                          textDecoration: !golfer.madeCut
+                            ? "line-through"
+                            : "none",
+                          paddingRight: 4,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {golfer.name}
+                        {isBench && (
+                          <span
+                            style={{
+                              marginLeft: 4,
+                              fontSize: "0.65rem",
+                              color: "#9ca8b6",
+                              fontWeight: 400,
+                            }}
+                          >
+                            bench
+                          </span>
+                        )}
+                      </span>
+                      <span key={`cut-${golfer.id}`} style={{ textAlign: "right", opacity: isBench ? 0.6 : 1 }}>
+                        <ProbCell value={dg?.cut ?? null} />
+                      </span>
+                      <span key={`top10-${golfer.id}`} style={{ textAlign: "right", opacity: isBench ? 0.6 : 1 }}>
+                        <ProbCell value={dg?.top10 ?? null} />
+                      </span>
+                      <span key={`top5-${golfer.id}`} style={{ textAlign: "right", opacity: isBench ? 0.6 : 1 }}>
+                        <ProbCell value={dg?.top5 ?? null} />
+                      </span>
+                      <span key={`win-${golfer.id}`} style={{ textAlign: "right", opacity: isBench ? 0.6 : 1 }}>
+                        <ProbCell value={dg?.win ?? null} />
+                      </span>
+                    </>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 4. Ownership × Performance
 // ---------------------------------------------------------------------------
 
 function OwnershipChart({ data }: { data: OwnershipPoint[] }) {
@@ -825,6 +1179,11 @@ export function AnalyticsTab({
   ); // undefined = loading, null = failed/unavailable
   const [sortBy, setSortBy] = useState<OddsSort>("cut");
 
+  const [dgData, setDgData] = useState<DGGolfer[] | null | undefined>(
+    undefined,
+  ); // undefined = loading, null = failed/unavailable
+  const [dgSortBy, setDgSortBy] = useState<OddsSort>("cut");
+
   const leagueId = tournament.importMeta?.leagueId;
 
   useEffect(() => {
@@ -839,6 +1198,15 @@ export function AnalyticsTab({
       )
       .catch(() => setOddsData(null));
   }, [leagueId]);
+
+  useEffect(() => {
+    fetch("/api/datagolf")
+      .then((r) => r.json())
+      .then((body: { golfers: DGGolfer[] | null }) =>
+        setDgData(body.golfers ?? null),
+      )
+      .catch(() => setDgData(null));
+  }, []);
 
   const similarityData = useMemo(
     () => computePickSimilarity(entries, pool, golferMap, users, leaderboard),
@@ -888,6 +1256,20 @@ export function AnalyticsTab({
           oddsLoading={oddsData === undefined}
           sortBy={sortBy}
           onSortChange={setSortBy}
+        />
+      </Section>
+
+      <Section
+        title="DataGolf Model"
+        subtitle="Predictive model probabilities from DataGolf. Sort teams by any category to see which roster has the best projected edge."
+      >
+        <DataGolfSection
+          leaderboard={leaderboard}
+          golferMap={golferMap}
+          dgData={dgData ?? null}
+          dgLoading={dgData === undefined}
+          sortBy={dgSortBy}
+          onSortChange={setDgSortBy}
         />
       </Section>
 
