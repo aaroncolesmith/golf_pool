@@ -49,7 +49,7 @@ export async function GET() {
     // DataGolf escapes single-quotes inside the string — unescape before parse
     const unescaped = jsonStr.replace(/\\'/g, "'");
     const data = JSON.parse(unescaped) as {
-      main?: { name: string; cut: number; top5: number; win: number }[];
+      main?: { name: string; cut: number; top5: number; top10: number; win: number }[];
     };
 
     const raw = data.main ?? [];
@@ -57,6 +57,7 @@ export async function GET() {
     const golfers = raw.map((g) => ({
       name: convertName(g.name),
       cut: g.cut,
+      top10: g.top10,
       top5: g.top5,
       win: g.win,
     }));
