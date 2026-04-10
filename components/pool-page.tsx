@@ -351,73 +351,50 @@ function LeaderboardTab({
   entries: PoolEntry[];
   users: { id: string; userName: string }[];
 }) {
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [view, setView] = useState<"pool" | "tournament">("pool");
   const [thruMap, setThruMap] = useState<Map<string, string>>(new Map());
-  const { refreshGolfers } = useAppState();
+  const { applyLiveScores } = useAppState();
 
-  // Fetch tournament leaderboard data to power the Thru column in pool cards
-  useEffect(() => {
-    if (!isLocked) return;
-    function normName(name: string): string {
-      return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
-    }
-    fetch(`/api/scores/tournament?tournamentId=${encodeURIComponent(tournamentId)}`)
-      .then((r) => r.json())
-      .then((data: { ok: boolean; golfers?: TournamentGolferRow[] }) => {
-        if (!data.ok || !data.golfers) return;
-        const map = new Map<string, string>();
-        for (const g of data.golfers) {
-          const norm = normName(g.name);
-          map.set(norm, g.thru);
-          const last = norm.split(" ").at(-1) ?? "";
-          if (last) map.set(`__last__${last}`, g.thru);
-        }
-        setThruMap(map);
-      })
-      .catch(() => { /* thru data is best-effort */ });
-  }, [isLocked, tournamentId]);
-
-  const handleSyncScores = useCallback(async (silent = false) => {
-    if (!silent) setIsSyncing(true);
-    setSyncMessage(null);
+  // Fetch live scores from ESPN and apply to state + thruMap
+  const fetchLiveScores = useCallback(async () => {
     try {
-      const res = await fetch("/api/scores/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tournamentId }),
-      });
-      const data = (await res.json()) as {
-        ok: boolean;
-        eventName?: string;
-        updated?: number;
-        unmatched?: string[];
-        error?: string;
-      };
-      if (data.ok) {
-        if (!silent) setSyncMessage(`Synced ${data.updated ?? 0} scores from "${data.eventName}".`);
-        await refreshGolfers(tournamentId);
-        onScoresSynced(new Date().toISOString());
-      } else {
-        if (!silent) setSyncMessage(`Sync failed: ${data.error ?? "Unknown error"}`);
-      }
-    } catch {
-      if (!silent) setSyncMessage("Sync failed — check your connection.");
-    } finally {
-      if (!silent) setIsSyncing(false);
-    }
-  }, [tournamentId, refreshGolfers, onScoresSynced]);
+      const res = await fetch(`/api/scores/tournament?tournamentId=${encodeURIComponent(tournamentId)}`);
+      const data = (await res.json()) as { ok: boolean; golfers?: TournamentGolferRow[] };
+      if (!data.ok || !data.golfers) return;
 
-  // Sync on mount + every 5 minutes when tournament is live
+      // Update leaderboard scores in state (no Supabase write)
+      applyLiveScores(tournamentId, data.golfers.map((g) => ({
+        name: g.name,
+        score: g.score,
+        position: g.position,
+        madeCut: g.madeCut,
+      })));
+
+      // Update thruMap for pool cards
+      function normName(name: string): string {
+        return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
+      }
+      const map = new Map<string, string>();
+      for (const g of data.golfers) {
+        const norm = normName(g.name);
+        map.set(norm, g.thru);
+        const last = norm.split(" ").at(-1) ?? "";
+        if (last) map.set(`__last__${last}`, g.thru);
+      }
+      setThruMap(map);
+      onScoresSynced(new Date().toISOString());
+    } catch {
+      // best-effort
+    }
+  }, [tournamentId, applyLiveScores, onScoresSynced]);
+
+  // Fetch on mount + refresh every 5 minutes when tournament is live
   useEffect(() => {
     if (!isLocked) return;
-    void handleSyncScores(true);
-    const timer = setInterval(() => {
-      void handleSyncScores(true);
-    }, AUTO_SYNC_INTERVAL_MS);
+    void fetchLiveScores();
+    const timer = setInterval(() => void fetchLiveScores(), AUTO_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [isLocked, handleSyncScores]);
+  }, [isLocked, fetchLiveScores]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -438,10 +415,6 @@ function LeaderboardTab({
           Tournament Leaderboard
         </button>
       </div>
-
-      {syncMessage && (
-        <p className="muted small" style={{ marginBottom: 12 }}>{syncMessage}</p>
-      )}
 
       {view === "pool" ? (
         leaderboard.length === 0 ? (
