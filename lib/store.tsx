@@ -42,6 +42,7 @@ type AppContextValue = {
   saveEntry: (poolId: string, selections: TeamSelection[], submit: boolean) => Promise<PoolEntry | null>;
   importTournamentFeed: (tournament: Tournament, golfers: Golfer[]) => Promise<void>;
   refreshGolfers: (tournamentId: string) => Promise<void>;
+  applyLiveScores: (tournamentId: string, espnGolfers: Array<{ name: string; score: number; position: string; madeCut: boolean }>) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -542,6 +543,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       },
 
       // -- Live scores --------------------------------------------------------
+      applyLiveScores(tournamentId, espnGolfers) {
+        function norm(s: string): string {
+          return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
+        }
+        const scoreMap = new Map(espnGolfers.map((g) => [norm(g.name), g]));
+        setState((prev) => ({
+          ...prev,
+          golfers: prev.golfers.map((g) => {
+            if (g.tournamentId !== tournamentId) return g;
+            const normed = norm(g.name);
+            let espn = scoreMap.get(normed);
+            if (!espn) {
+              const last = normed.split(" ").at(-1) ?? "";
+              for (const [key, val] of scoreMap) {
+                if (key.endsWith(` ${last}`) || key === last) { espn = val; break; }
+              }
+            }
+            if (!espn) return g;
+            return { ...g, currentScoreToPar: espn.score, position: espn.position, madeCut: espn.madeCut };
+          }),
+          scoresLastSyncedAt: new Date().toISOString(),
+        }));
+      },
+
       async refreshGolfers(tournamentId) {
         const supabase = await getSupabaseBrowserClient();
         const { data } = await supabase
