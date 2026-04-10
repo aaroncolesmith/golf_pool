@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DraftBoard } from "@/components/draft-board";
 import { AnalyticsTab } from "@/components/analytics-tab";
 import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
@@ -355,46 +355,52 @@ function LeaderboardTab({
   const [thruMap, setThruMap] = useState<Map<string, string>>(new Map());
   const { applyLiveScores } = useAppState();
 
-  // Fetch live scores from ESPN and apply to state + thruMap
-  const fetchLiveScores = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/scores/tournament?tournamentId=${encodeURIComponent(tournamentId)}`);
-      const data = (await res.json()) as { ok: boolean; golfers?: TournamentGolferRow[] };
-      if (!data.ok || !data.golfers) return;
+  // Keep refs to callbacks so the interval never needs to re-register
+  const applyLiveScoresRef = useRef(applyLiveScores);
+  const onScoresSyncedRef = useRef(onScoresSynced);
+  useEffect(() => { applyLiveScoresRef.current = applyLiveScores; });
+  useEffect(() => { onScoresSyncedRef.current = onScoresSynced; });
 
-      // Update leaderboard scores in state (no Supabase write)
-      applyLiveScores(tournamentId, data.golfers.map((g) => ({
-        name: g.name,
-        score: g.score,
-        position: g.position,
-        madeCut: g.madeCut,
-      })));
-
-      // Update thruMap for pool cards
-      function normName(name: string): string {
-        return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
-      }
-      const map = new Map<string, string>();
-      for (const g of data.golfers) {
-        const norm = normName(g.name);
-        map.set(norm, g.thru);
-        const last = norm.split(" ").at(-1) ?? "";
-        if (last) map.set(`__last__${last}`, g.thru);
-      }
-      setThruMap(map);
-      onScoresSynced(new Date().toISOString());
-    } catch {
-      // best-effort
-    }
-  }, [tournamentId, applyLiveScores, onScoresSynced]);
-
-  // Fetch on mount + refresh every 5 minutes when tournament is live
+  // Fetch on mount + refresh every 5 minutes when tournament is live.
+  // Effect only depends on isLocked/tournamentId — callbacks accessed via refs
+  // to avoid re-registering the interval on every store state update.
   useEffect(() => {
     if (!isLocked) return;
+
+    async function fetchLiveScores() {
+      try {
+        const res = await fetch(`/api/scores/tournament?tournamentId=${encodeURIComponent(tournamentId)}`);
+        const data = (await res.json()) as { ok: boolean; golfers?: TournamentGolferRow[] };
+        if (!data.ok || !data.golfers) return;
+
+        applyLiveScoresRef.current(tournamentId, data.golfers.map((g) => ({
+          name: g.name,
+          score: g.score,
+          position: g.position,
+          madeCut: g.madeCut,
+        })));
+
+        function normName(name: string): string {
+          return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
+        }
+        const map = new Map<string, string>();
+        for (const g of data.golfers) {
+          const norm = normName(g.name);
+          map.set(norm, g.thru);
+          const last = norm.split(" ").at(-1) ?? "";
+          if (last) map.set(`__last__${last}`, g.thru);
+        }
+        setThruMap(map);
+        onScoresSyncedRef.current(new Date().toISOString());
+      } catch {
+        // best-effort
+      }
+    }
+
     void fetchLiveScores();
     const timer = setInterval(() => void fetchLiveScores(), AUTO_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [isLocked, fetchLiveScores]);
+  }, [isLocked, tournamentId]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
