@@ -232,7 +232,7 @@ function MasterboardCard({
               top: "55%",
               transform: "translate(-50%, -50%)",
               height: "80%",
-              opacity: 0.95,
+              opacity: 0.55,
             }}
           />
           <div style={{
@@ -244,7 +244,6 @@ function MasterboardCard({
             color: "#ff0000",
             fontSize: "1.8rem",
             fontWeight: 900,
-            fontStyle: "italic",
             letterSpacing: "0.04em",
             lineHeight: 1,
             WebkitTextStroke: "2px #7a0000",

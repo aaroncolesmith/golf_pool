@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AppProvider } from "@/components/app-provider";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { GlobalNav } from "@/components/global-nav";
 
 export const metadata: Metadata = {
   title: "GolfPool",
@@ -26,6 +27,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <AppProvider>
+          <GlobalNav />
           <ErrorBoundary>{children}</ErrorBoundary>
         </AppProvider>
       </body>
