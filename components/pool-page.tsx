@@ -214,21 +214,6 @@ function MasterboardCard({
 
   return (
     <div style={{ position: "relative" }}>
-      {isElim && (
-        <img
-          src="/tiger_dui.png"
-          alt="Missed the cut"
-          style={{
-            position: "absolute",
-            right: 6,
-            bottom: 6,
-            height: 80,
-            opacity: 0.92,
-            zIndex: 2,
-            pointerEvents: "none",
-          }}
-        />
-      )}
     <table className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
       <colgroup>
         <col className="mb-col-rank" />
@@ -239,17 +224,18 @@ function MasterboardCard({
       <thead>
         <tr>
           <th className="mb-col-rank">{isElim ? "—" : rank}</th>
-          <th className="mb-col-name" style={{ position: "relative" }}>
+          <th className="mb-col-name">
             {row.teamName}
             {isYou && <span style={{ color: "#b89a2e", marginLeft: 4, fontSize: "0.6rem" }}>★</span>}
             {isElim && (
               <span style={{
-                marginLeft: 8,
-                color: "#cc0000",
+                marginLeft: 10,
+                color: "#e00",
                 fontWeight: 900,
-                fontSize: "0.72rem",
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
+                fontSize: "0.85rem",
+                letterSpacing: "0.06em",
+                fontStyle: "italic",
+                textShadow: "0 1px 2px rgba(0,0,0,0.3)",
               }}>
                 MISSED THE CUT
               </span>
@@ -258,7 +244,16 @@ function MasterboardCard({
           <th className={`mb-col-score ${mbScoreClass(row.teamScore, isElim)}`}>
             {isElim ? "—" : mbScoreStr(row.teamScore)}
           </th>
-          <th className="mb-col-thru" />
+          <th className="mb-col-thru">
+            {isElim && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src="/tiger_dui.png"
+                alt=""
+                style={{ height: 52, display: "block", marginLeft: "auto" }}
+              />
+            )}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -285,6 +280,7 @@ function MasterboardCard({
 }
 
 function Masterboard({
+
   leaderboard,
   currentUserId,
   isLocked,
