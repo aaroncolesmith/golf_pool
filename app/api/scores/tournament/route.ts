@@ -202,19 +202,29 @@ export async function GET(request: Request) {
     const scoreValue = c.score ?? "";
     const scoreTrimmed = scoreValue.trim().toUpperCase();
 
+    const currentPeriod = competitionStatus?.period ?? 1;
+
+    // Some tournaments (e.g. the Masters) don't mark cut players as "CUT" in
+    // the score field. Instead, cut players in period 3+ have a linescore entry
+    // for the current round with displayValue "-" and no nested hole data.
+    const weekendRoundLS = currentPeriod >= 3
+      ? c.linescores?.find((ls) => ls.period === currentPeriod)
+      : null;
+    const missedCutMajorStyle =
+      !!weekendRoundLS &&
+      weekendRoundLS.displayValue === "-" &&
+      !weekendRoundLS.linescores?.length;
+
     const isCutLike =
       CUT_STATUSES.has(statusName) ||
       scoreTrimmed === "CUT" ||
       scoreTrimmed === "WD" ||
       scoreTrimmed === "DQ" ||
-      scoreTrimmed === "MDF";
+      scoreTrimmed === "MDF" ||
+      missedCutMajorStyle;
 
     const madeCut = !isCutLike;
     const scoreToParInt = isCutLike ? 0 : parseScoreToPar(scoreValue);
-
-    // Per-round stroke counts, indexed by round number (1-based).
-    // ESPN now returns period as a direct number on each linescore.
-    const currentPeriod = competitionStatus?.period ?? 1;
     const roundScores: Record<number, number | null> = {};
     if (c.linescores) {
       for (const ls of c.linescores) {
