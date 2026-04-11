@@ -214,6 +214,46 @@ function MasterboardCard({
 
   return (
     <div style={{ position: "relative" }}>
+      {isElim && (
+        <div style={{
+          position: "absolute",
+          top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 2,
+          pointerEvents: "none",
+          overflow: "hidden",
+        }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/tiger_dui.png"
+            alt=""
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "55%",
+              transform: "translate(-50%, -50%)",
+              height: "80%",
+              opacity: 0.95,
+            }}
+          />
+          <div style={{
+            position: "absolute",
+            top: "28%",
+            left: 0,
+            right: 0,
+            textAlign: "center",
+            color: "#ff0000",
+            fontSize: "1.8rem",
+            fontWeight: 900,
+            fontStyle: "italic",
+            letterSpacing: "0.04em",
+            lineHeight: 1,
+            WebkitTextStroke: "2px #7a0000",
+            textShadow: "1px 1px 0 #7a0000, -1px -1px 0 #7a0000, 1px -1px 0 #7a0000, -1px 1px 0 #7a0000",
+          }}>
+            MISSED THE CUT
+          </div>
+        </div>
+      )}
     <table className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
       <colgroup>
         <col className="mb-col-rank" />
@@ -227,33 +267,11 @@ function MasterboardCard({
           <th className="mb-col-name">
             {row.teamName}
             {isYou && <span style={{ color: "#b89a2e", marginLeft: 4, fontSize: "0.6rem" }}>★</span>}
-            {isElim && (
-              <span style={{
-                marginLeft: 10,
-                color: "#e00",
-                fontWeight: 900,
-                fontSize: "0.85rem",
-                letterSpacing: "0.06em",
-                fontStyle: "italic",
-                textShadow: "0 1px 2px rgba(0,0,0,0.3)",
-              }}>
-                MISSED THE CUT
-              </span>
-            )}
           </th>
           <th className={`mb-col-score ${mbScoreClass(row.teamScore, isElim)}`}>
             {isElim ? "—" : mbScoreStr(row.teamScore)}
           </th>
-          <th className="mb-col-thru">
-            {isElim && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src="/tiger_dui.png"
-                alt=""
-                style={{ height: 52, display: "block", marginLeft: "auto" }}
-              />
-            )}
-          </th>
+          <th className="mb-col-thru" />
         </tr>
       </thead>
       <tbody>
