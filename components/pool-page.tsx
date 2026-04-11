@@ -213,6 +213,22 @@ function MasterboardCard({
   }
 
   return (
+    <div style={{ position: "relative" }}>
+      {isElim && (
+        <img
+          src="/tiger_dui.png"
+          alt="Missed the cut"
+          style={{
+            position: "absolute",
+            right: 6,
+            bottom: 6,
+            height: 80,
+            opacity: 0.92,
+            zIndex: 2,
+            pointerEvents: "none",
+          }}
+        />
+      )}
     <table className={`mb-card${isElim ? " mb-card--elim" : ""}`}>
       <colgroup>
         <col className="mb-col-rank" />
@@ -223,12 +239,24 @@ function MasterboardCard({
       <thead>
         <tr>
           <th className="mb-col-rank">{isElim ? "—" : rank}</th>
-          <th className="mb-col-name">
+          <th className="mb-col-name" style={{ position: "relative" }}>
             {row.teamName}
             {isYou && <span style={{ color: "#b89a2e", marginLeft: 4, fontSize: "0.6rem" }}>★</span>}
+            {isElim && (
+              <span style={{
+                marginLeft: 8,
+                color: "#cc0000",
+                fontWeight: 900,
+                fontSize: "0.72rem",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}>
+                MISSED THE CUT
+              </span>
+            )}
           </th>
           <th className={`mb-col-score ${mbScoreClass(row.teamScore, isElim)}`}>
-            {isElim ? "OUT" : mbScoreStr(row.teamScore)}
+            {isElim ? "—" : mbScoreStr(row.teamScore)}
           </th>
           <th className="mb-col-thru" />
         </tr>
@@ -252,6 +280,7 @@ function MasterboardCard({
         )}
       </tbody>
     </table>
+    </div>
   );
 }
 

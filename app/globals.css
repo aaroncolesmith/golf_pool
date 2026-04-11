@@ -1242,7 +1242,7 @@ button:disabled {
   background: #f5f3ec;
 }
 
-.mb-card--elim { opacity: 0.5; }
+.mb-card--elim { opacity: 0.75; filter: grayscale(0.3); }
 
 /* Fixed column widths */
 .mb-col-rank  { width: 36px; }
