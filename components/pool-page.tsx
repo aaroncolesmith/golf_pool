@@ -365,6 +365,7 @@ function LeaderboardTab({
   tournamentId,
   scoresLastSyncedAt,
   onScoresSynced,
+  onEspnScores,
   golferMap,
   entries,
   users,
@@ -376,18 +377,18 @@ function LeaderboardTab({
   tournamentId: string;
   scoresLastSyncedAt: string | null;
   onScoresSynced: (ts: string) => void;
+  onEspnScores: (scores: Map<string, { score: number; position: string; madeCut: boolean }>) => void;
   golferMap: Map<string, Golfer>;
   entries: PoolEntry[];
   users: { id: string; userName: string }[];
 }) {
   const [view, setView] = useState<"pool" | "tournament">("pool");
   const [thruMap, setThruMap] = useState<Map<string, string>>(new Map());
-  const { applyLiveScores } = useAppState();
 
   // Keep refs to callbacks so the interval never needs to re-register
-  const applyLiveScoresRef = useRef(applyLiveScores);
+  const onEspnScoresRef = useRef(onEspnScores);
   const onScoresSyncedRef = useRef(onScoresSynced);
-  useEffect(() => { applyLiveScoresRef.current = applyLiveScores; });
+  useEffect(() => { onEspnScoresRef.current = onEspnScores; });
   useEffect(() => { onScoresSyncedRef.current = onScoresSynced; });
 
   // Fetch on mount + refresh every 5 minutes when tournament is live.
@@ -402,24 +403,27 @@ function LeaderboardTab({
         const data = (await res.json()) as { ok: boolean; golfers?: TournamentGolferRow[] };
         if (!data.ok || !data.golfers) return;
 
-        applyLiveScoresRef.current(tournamentId, data.golfers.map((g) => ({
-          name: g.name,
-          score: g.score,
-          position: g.position,
-          madeCut: g.madeCut,
-        })));
-
         function normName(name: string): string {
           return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
         }
-        const map = new Map<string, string>();
+
+        // Build ESPN score map keyed by normalized name — passed up to PoolPage
+        // so it merges with Supabase roster data regardless of load order.
+        const scoreMap = new Map(data.golfers.map((g) => [
+          normName(g.name),
+          { score: g.score, position: g.position, madeCut: g.madeCut },
+        ]));
+        onEspnScoresRef.current(scoreMap);
+
+        // Also update thruMap for pool cards
+        const thru = new Map<string, string>();
         for (const g of data.golfers) {
           const norm = normName(g.name);
-          map.set(norm, g.thru);
+          thru.set(norm, g.thru);
           const last = norm.split(" ").at(-1) ?? "";
-          if (last) map.set(`__last__${last}`, g.thru);
+          if (last) thru.set(`__last__${last}`, g.thru);
         }
-        setThruMap(map);
+        setThruMap(thru);
         onScoresSyncedRef.current(new Date().toISOString());
       } catch {
         // best-effort
@@ -1278,12 +1282,30 @@ export function PoolPage({ poolId }: { poolId: string }) {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
+  // ESPN live scores stored separately so they can arrive before or after
+  // Supabase golfers load without a race condition.
+  type EspnScore = { score: number; position: string; madeCut: boolean };
+  const [espnScores, setEspnScores] = useState<Map<string, EspnScore>>(new Map());
+
   useEffect(() => {
-    const storeGolfers = state.golfers.filter(
-      (g) => g.tournamentId === tournament?.id,
-    );
-    setGolferMap(new Map(storeGolfers.map((g) => [g.id, g])));
-  }, [state.golfers, tournament?.id]);
+    function normName(s: string): string {
+      return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
+    }
+    const storeGolfers = state.golfers.filter((g) => g.tournamentId === tournament?.id);
+    const merged = new Map(storeGolfers.map((g): [string, Golfer] => {
+      const normed = normName(g.name);
+      let espn = espnScores.get(normed);
+      if (!espn) {
+        const last = normed.split(" ").at(-1) ?? "";
+        for (const [key, val] of espnScores) {
+          if (key.endsWith(` ${last}`) || key === last) { espn = val; break; }
+        }
+      }
+      if (!espn) return [g.id, g];
+      return [g.id, { ...g, currentScoreToPar: espn.score, position: espn.position, madeCut: espn.madeCut }];
+    }));
+    setGolferMap(merged);
+  }, [state.golfers, tournament?.id, espnScores]);
 
   // Supabase Realtime — live score updates
   useEffect(() => {
@@ -1542,6 +1564,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
             tournamentId={currentTournament.id}
             scoresLastSyncedAt={localSyncedAt ?? state.scoresLastSyncedAt}
             onScoresSynced={setLocalSyncedAt}
+            onEspnScores={setEspnScores}
             golferMap={golferMap}
             entries={state.entries}
             users={state.users}
