@@ -205,15 +205,17 @@ export async function GET(request: Request) {
     const currentPeriod = competitionStatus?.period ?? 1;
 
     // Some tournaments (e.g. the Masters) don't mark cut players as "CUT" in
-    // the score field. Instead, cut players in period 3+ have a linescore entry
-    // for the current round with displayValue "-" and no nested hole data.
-    const weekendRoundLS = currentPeriod >= 3
-      ? c.linescores?.find((ls) => ls.period === currentPeriod)
+    // the score field. Instead, cut players never play R3 — so their R3 linescore
+    // shows displayValue "-" with no nested hole data. We always check R3 (not the
+    // current period) so that R4 players who haven't teed off yet aren't mis-flagged
+    // (their R4 linescore also shows "-" but their R3 linescore has real data).
+    const r3LS = currentPeriod >= 3
+      ? c.linescores?.find((ls) => ls.period === 3)
       : null;
     const missedCutMajorStyle =
-      !!weekendRoundLS &&
-      weekendRoundLS.displayValue === "-" &&
-      !weekendRoundLS.linescores?.length;
+      !!r3LS &&
+      r3LS.displayValue === "-" &&
+      !r3LS.linescores?.length;
 
     const isCutLike =
       CUT_STATUSES.has(statusName) ||
