@@ -516,20 +516,15 @@ function MembersTab({
   isAdmin: boolean;
   isLocked: boolean;
 }) {
-  const { inviteEmails } = useAppState();
-  const [inviteInput, setInviteInput] = useState("");
-  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  async function handleInvite() {
-    const emails = inviteInput
-      .split(",")
-      .map((e) => e.trim())
-      .filter(Boolean);
-    if (emails.length === 0) return;
-    await inviteEmails(poolId, emails);
-    setInviteInput("");
-    setInviteMessage(`Invited ${emails.length} ${emails.length === 1 ? "person" : "people"}.`);
-    setTimeout(() => setInviteMessage(null), 4000);
+  const shareUrl = `${typeof window !== "undefined" ? window.location.origin : ""}${poolSharePath(currentPool)}`;
+
+  function handleCopy() {
+    void navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
   }
 
   return (
@@ -553,38 +548,41 @@ function MembersTab({
         })}
       </div>
 
-      {isAdmin && !isLocked && (
-        <div className="stack" style={{ marginTop: 8 }}>
-          <p
+      <div className="stack" style={{ marginTop: 8 }}>
+        <p
+          style={{
+            fontSize: "0.78rem",
+            fontWeight: 800,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            color: "var(--muted)",
+          }}
+        >
+          Invite link
+        </p>
+        <p className="muted small" style={{ margin: 0 }}>
+          Share this link — anyone with it can join <strong>{currentPool.name}</strong>.
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            readOnly
+            value={shareUrl}
             style={{
-              fontSize: "0.78rem",
-              fontWeight: 800,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--muted)",
+              flex: 1, padding: "8px 12px", borderRadius: 10, border: "1px solid var(--line)",
+              fontSize: "0.85rem", background: "var(--bg, #f7f8fa)", color: "var(--text)",
+              minWidth: 0,
             }}
-          >
-            Invite by email
-          </p>
-          <label className="field">
-            <textarea
-              rows={2}
-              placeholder="email@example.com, another@example.com"
-              value={inviteInput}
-              onChange={(e) => setInviteInput(e.target.value)}
-            />
-          </label>
-          <button className="primary-button" onClick={handleInvite} type="button" style={{ alignSelf: "flex-start" }}>
-            Send invites
+            onFocus={(e) => e.target.select()}
+          />
+          <button type="button" className="primary-button small-button" onClick={handleCopy}>
+            {copied ? "Copied ✓" : "Copy"}
           </button>
-          {inviteMessage && <p className="muted small">{inviteMessage}</p>}
-          {currentPool.invitedEmails.length > 0 && (
-            <p className="muted small">
-              Already invited: {currentPool.invitedEmails.join(", ")}
-            </p>
-          )}
         </div>
-      )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="muted small">Join code:</span>
+          <span className="pill" style={{ fontSize: "0.8rem", fontWeight: 700 }}>{currentPool.joinCode}</span>
+        </div>
+      </div>
     </div>
   );
 }
