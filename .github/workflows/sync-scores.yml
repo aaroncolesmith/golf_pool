@@ -19,18 +19,14 @@ jobs:
     steps:
       - name: Sync scores
         run: |
-          response=$(curl -s -o /dev/null -w "%{http_code}" \
+          response=$(curl -s -w "\n%{http_code}" \
             -X GET "${{ secrets.APP_URL }}/api/scores/cron" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
-          echo "HTTP status: $response"
-          if [ "$response" != "200" ]; then
-            echo "Score sync failed with status $response"
+          body=$(echo "$response" | head -n -1)
+          status=$(echo "$response" | tail -n1)
+          echo "HTTP status: $status"
+          echo "$body" | jq . || echo "$body"
+          if [ "$status" != "200" ]; then
+            echo "Score sync failed with status $status"
             exit 1
           fi
-
-      - name: Log response
-        if: always()
-        run: |
-          curl -s \
-            -X GET "${{ secrets.APP_URL }}/api/scores/cron" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" | jq .
