@@ -161,6 +161,16 @@ function lastName(fullName: string): string {
   return parts[parts.length - 1].toUpperCase();
 }
 
+function displayGolferName(fullName: string, dupLastNames: Set<string>): string {
+  const parts = fullName.trim().split(" ");
+  const last = parts[parts.length - 1].toUpperCase();
+  if (dupLastNames.has(last.toLowerCase())) {
+    const initial = (parts[0][0] ?? "").toUpperCase();
+    return `${initial}. ${last}`;
+  }
+  return last;
+}
+
 function MasterboardCard({
   row,
   rank,
@@ -168,6 +178,7 @@ function MasterboardCard({
   currentUserId,
   isLocked,
   thruMap,
+  dupLastNames,
 }: {
   row: LbRow;
   rank: string;
@@ -175,6 +186,7 @@ function MasterboardCard({
   currentUserId: string | null;
   isLocked: boolean;
   thruMap: Map<string, string>;
+  dupLastNames: Set<string>;
 }) {
   const isYou = row.userId === currentUserId;
   const canSeePicks = isLocked || isYou;
@@ -203,7 +215,7 @@ function MasterboardCard({
     return (
       <tr key={g.id} className={`${className}${isCut ? " mb-cut-row" : ""}`}>
         <td className="mb-col-rank" />
-        <td className="mb-col-name">{lastName(g.name)}</td>
+        <td className="mb-col-name">{displayGolferName(g.name, dupLastNames)}</td>
         <td className={`mb-col-score ${isCut ? "mb-grey" : mbScoreClass(g.currentScoreToPar)}`}>
           {isCut ? "CUT" : mbScoreStr(g.currentScoreToPar)}
         </td>
@@ -311,6 +323,18 @@ function Masterboard({
   const activeRows = leaderboard.filter((r) => r.status !== "eliminated");
   const eliminatedRows = leaderboard.filter((r) => r.status === "eliminated");
 
+  // Compute which last names appear for more than one golfer across all entries
+  const lastNameCounts = new Map<string, number>();
+  for (const row of leaderboard) {
+    for (const g of [...row.countingGolfers, ...row.benchGolfers]) {
+      const last = lastName(g.name).toLowerCase();
+      lastNameCounts.set(last, (lastNameCounts.get(last) ?? 0) + 1);
+    }
+  }
+  const dupLastNames = new Set(
+    [...lastNameCounts.entries()].filter(([, n]) => n > 1).map(([last]) => last)
+  );
+
   function rankOf(row: LbRow): string {
     const myScore = row.teamScore ?? 999;
     const betterCount = activeRows.filter((r) => (r.teamScore ?? 999) < myScore).length;
@@ -336,6 +360,7 @@ function Masterboard({
             currentUserId={currentUserId}
             isLocked={isLocked}
             thruMap={thruMap}
+            dupLastNames={dupLastNames}
           />
         ))}
       </div>
@@ -357,6 +382,7 @@ function Masterboard({
                 currentUserId={currentUserId}
                 isLocked={isLocked}
                 thruMap={thruMap}
+                dupLastNames={dupLastNames}
               />
             ))}
           </div>
@@ -1251,7 +1277,7 @@ function TournamentLeaderboard({
                   </td>
                   <td className="tournament-lb-td tournament-lb-today">
                     {g.today !== null ? (
-                      <span className={scoreBadgeClass(g.today - 72)}>{g.today}</span>
+                      <span className={scoreBadgeClass(g.today)}>{scoreLabel(g.today)}</span>
                     ) : "—"}
                   </td>
                   <td className="tournament-lb-td tournament-lb-thru">{g.thru}</td>

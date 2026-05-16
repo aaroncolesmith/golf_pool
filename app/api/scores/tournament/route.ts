@@ -224,15 +224,22 @@ export async function GET(request: Request) {
     const scoreToParInt = parseScoreToPar(scoreValue);
 
     // Round scores: linescores array is 0-indexed (index 0 = R1, 1 = R2, etc.)
-    // Only record rounds with a real score (ESPN fills placeholder 0s for unstarted rounds)
+    // Past rounds are always complete. The current round is only stored once all
+    // 18 holes are done — ESPN emits a running partial stroke count (e.g. 45
+    // through 13 holes) that must not be treated as a final round score.
     const roundScores: Record<number, number | null> = {};
     if (c.linescores) {
       c.linescores.forEach((ls, idx) => {
         const roundNum = idx + 1;
         const val = parseRoundScore(ls.value);
-        if (val !== null && val > 0) {
+        if (val === null || val <= 0) return;
+        if (roundNum < currentPeriod) {
           roundScores[roundNum] = val;
+        } else if (roundNum === currentPeriod) {
+          const holesPlayed = ls.linescores?.length ?? 0;
+          if (holesPlayed >= 18) roundScores[roundNum] = val;
         }
+        // Future rounds skipped
       });
     }
 
