@@ -204,45 +204,44 @@ export async function GET(request: Request) {
 
     const currentPeriod = competitionStatus?.period ?? 1;
 
-    // Some tournaments (e.g. the Masters) don't mark cut players as "CUT" in
-    // the score field. Instead, cut players never play R3 — so their R3 linescore
-    // shows displayValue "-" with no nested hole data. We always check R3 (not the
-    // current period) so that R4 players who haven't teed off yet aren't mis-flagged
-    // (their R4 linescore also shows "-" but their R3 linescore has real data).
-    const r3LS = currentPeriod >= 3
-      ? c.linescores?.find((ls) => ls.period === 3)
-      : null;
-    const missedCutMajorStyle =
-      !!r3LS &&
-      r3LS.displayValue === "-" &&
-      !r3LS.linescores?.length;
-
-    const isCutLike =
+    // Explicit cut: status field or score string says CUT/WD/DQ/MDF
+    const explicitCutLike =
       CUT_STATUSES.has(statusName) ||
       scoreTrimmed === "CUT" ||
       scoreTrimmed === "WD" ||
       scoreTrimmed === "DQ" ||
-      scoreTrimmed === "MDF" ||
-      missedCutMajorStyle;
+      scoreTrimmed === "MDF";
 
+    // Inferred cut: in the current ESPN API, linescores is an index-based array
+    // (no .period field). Made-cut players have 4 slots (0-placeholder for unplayed
+    // rounds); missed-cut players stop at 2. If we're in R3+ and a player has <3
+    // linescore entries, they didn't make the cut.
+    const lsCount = c.linescores?.length ?? 0;
+    const inferredCut = !explicitCutLike && currentPeriod >= 3 && lsCount < 3;
+
+    const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;
-    const scoreToParInt = isCutLike ? 0 : parseScoreToPar(scoreValue);
+    const scoreToParInt = parseScoreToPar(scoreValue);
+
+    // Round scores: linescores array is 0-indexed (index 0 = R1, 1 = R2, etc.)
+    // Only record rounds with a real score (ESPN fills placeholder 0s for unstarted rounds)
     const roundScores: Record<number, number | null> = {};
     if (c.linescores) {
-      for (const ls of c.linescores) {
-        const period = ls.period;
-        if (period !== undefined) {
-          roundScores[period] = parseRoundScore(ls.value);
+      c.linescores.forEach((ls, idx) => {
+        const roundNum = idx + 1;
+        const val = parseRoundScore(ls.value);
+        if (val !== null && val > 0) {
+          roundScores[roundNum] = val;
         }
-      }
+      });
     }
 
     // Thru: derive from the nested per-hole linescores inside the current round.
-    // ESPN now nests hole-by-hole scores under each round's top-level linescore.
-    // c.status?.type?.detail is no longer populated per-competitor in the current API.
+    // ESPN nests hole-by-hole scores under each round's top-level linescore.
+    // Use array index (currentPeriod - 1) since linescores have no .period field.
     let thru = "-";
     if (madeCut) {
-      const currentRoundLS = c.linescores?.find((ls) => ls.period === currentPeriod);
+      const currentRoundLS = c.linescores?.[currentPeriod - 1];
       const holesCompleted = currentRoundLS?.linescores?.length ?? 0;
       if (holesCompleted >= 18) {
         thru = "F";
