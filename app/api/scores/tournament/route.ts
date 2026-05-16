@@ -195,14 +195,48 @@ export async function GET(request: Request) {
   const competition = event.competitions?.[0];
   const competitors = competition?.competitors ?? [];
   const competitionStatus = competition?.status;
+  const currentPeriod = competitionStatus?.period ?? 1;
+
+  // Derive course par per round from competitors who haven't started the current
+  // round yet — their cumulative score reflects only completed rounds, making the
+  // arithmetic unambiguous. Avoids the PAR_PER_ROUND=72 assumption that breaks on
+  // courses like Quail Hollow (par 70).
+  let coursePar = 72;
+  if (currentPeriod >= 2) {
+    const parSamples: number[] = [];
+    for (const c of competitors) {
+      const statusName = c.status?.type?.name ?? "";
+      const scoreTrimmed = (c.score ?? "").trim().toUpperCase();
+      if (CUT_STATUSES.has(statusName) || ["CUT", "WD", "DQ", "MDF"].includes(scoreTrimmed)) continue;
+      if (!c.linescores) continue;
+      const currentRoundLS = c.linescores[currentPeriod - 1];
+      const holesStarted = currentRoundLS?.linescores?.length ?? 0;
+      const currentRoundVal = parseRoundScore(currentRoundLS?.value);
+      if (holesStarted > 0 || (currentRoundVal && currentRoundVal > 0)) continue;
+      let totalStrokes = 0;
+      let valid = true;
+      const rounds = currentPeriod - 1;
+      for (let r = 0; r < rounds; r++) {
+        const val = parseRoundScore(c.linescores[r]?.value);
+        if (!val || val <= 0) { valid = false; break; }
+        totalStrokes += val;
+      }
+      if (!valid || rounds === 0) continue;
+      const implied = (totalStrokes - parseScoreToPar(c.score ?? "")) / rounds;
+      if (Number.isInteger(implied) && implied >= 68 && implied <= 74) parSamples.push(implied);
+    }
+    if (parSamples.length >= 2) {
+      const freq = new Map<number, number>();
+      for (const p of parSamples) freq.set(p, (freq.get(p) ?? 0) + 1);
+      coursePar = [...freq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    }
+  }
 
   // Build golfer list
   const rawGolfers = competitors.map((c): TournamentGolfer & { _scoreToParInt: number } => {
     const statusName = c.status?.type?.name ?? "";
     const scoreValue = c.score ?? "";
     const scoreTrimmed = scoreValue.trim().toUpperCase();
-
-    const currentPeriod = competitionStatus?.period ?? 1;
 
     // Explicit cut: status field or score string says CUT/WD/DQ/MDF
     const explicitCutLike =
@@ -259,17 +293,15 @@ export async function GET(request: Request) {
 
     // Today: to-par for the current round.
     // Formula: today = totalTopar − sum of completed previous rounds' to-par
-    // For PGA Tour events par is always 72 per round.
-    const PAR_PER_ROUND = 72;
+    // Uses coursePar derived dynamically above rather than a hardcoded 72.
     let today: number | null = null;
 
     if (madeCut && thru !== "-") {
-      // Sum raw strokes for all rounds BEFORE today
       let completedTopar = 0;
       for (let p = 1; p < currentPeriod; p++) {
         const raw = roundScores[p];
         if (raw !== null && raw !== undefined) {
-          completedTopar += raw - PAR_PER_ROUND;
+          completedTopar += raw - coursePar;
         }
       }
       today = scoreToParInt - completedTopar;
