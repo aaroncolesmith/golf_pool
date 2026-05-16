@@ -257,40 +257,64 @@ export async function fetchEspnScores(tournamentName: string): Promise<EspnSyncR
   const competitionPeriod = competition?.status?.period ?? 0;
 
   const rawGolfers: GolferScoreUpdate[] = competitors.map((c) => {
-    // status may be on the competitor (old API) or absent (new API where it
-    // lives on the competition object instead).
     const statusName = c.status?.type?.name ?? "";
     const scoreValue = c.score ?? "";
-
-    // Detect CUT/WD/DQ from the per-competitor status field (old API) or from
-    // the score string itself (new API encodes "CUT", "WD", "DQ" there).
     const scoreTrimmed = scoreValue.trim().toUpperCase();
-    const isCutLike =
+
+    // --- Cut detection ---
+    // Explicit: status field or score string says CUT/WD/DQ/MDF (old API + some new API cases)
+    const explicitCutLike =
       CUT_STATUSES.has(statusName) ||
       scoreTrimmed === "CUT" ||
       scoreTrimmed === "WD" ||
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
 
+    // Inferred: in the current ESPN API, players who made the cut have placeholder
+    // linescore entries (value = 0) for rounds not yet played, keeping their
+    // linescores array at 4 slots. Players who missed the cut have no R3 entry —
+    // their array stops at 2. So if we're in R3+ and a player has <3 linescore
+    // slots, they didn't make the cut.
+    const lsCount = c.linescores?.length ?? 0;
+    const inferredCut =
+      !explicitCutLike &&
+      competitionPeriod >= 3 &&
+      lsCount < 3;
+
+    const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;
 
+    // --- Rounds complete ---
+    // Only count rounds with a score > 0. ESPN fills upcoming round slots with
+    // 0.0 as a placeholder, which must not be treated as a completed round.
     const roundsComplete =
-      c.linescores?.filter((ls) => {
+      (c.linescores ?? []).filter((ls) => {
         const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
-        return typeof v === "number" && !isNaN(v);
-      }).length ?? competitionPeriod;
+        return typeof v === "number" && !isNaN(v) && v > 0;
+      }).length || competitionPeriod;
 
+    // --- Position ---
     let position: string;
     if (!madeCut) {
-      // Prefer the explicit status name; fall back to the score string (e.g. "CUT")
-      position = statusName ? positionFromStatus(statusName) : scoreTrimmed;
+      if (statusName) {
+        position = positionFromStatus(statusName);
+      } else if (scoreTrimmed === "CUT" || scoreTrimmed === "WD" || scoreTrimmed === "DQ" || scoreTrimmed === "MDF") {
+        position = scoreTrimmed;
+      } else {
+        position = "CUT"; // inferred from linescore count
+      }
     } else {
       position = "TBD";
     }
 
+    // --- Score ---
+    // For inferred cuts the score string is still a real score (e.g. "+12"), keep it.
+    // For explicit cuts where ESPN encodes the status as the score string, parse gives 0 (correct).
+    const scoreToParInt = parseScoreToPar(scoreValue);
+
     return {
       displayName: c.athlete.displayName,
-      scoreToParInt: isCutLike ? 0 : parseScoreToPar(scoreValue),
+      scoreToParInt,
       position,
       madeCut,
       roundsComplete,
