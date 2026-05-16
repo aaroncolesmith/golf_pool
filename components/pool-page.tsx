@@ -323,16 +323,19 @@ function Masterboard({
   const activeRows = leaderboard.filter((r) => r.status !== "eliminated");
   const eliminatedRows = leaderboard.filter((r) => r.status === "eliminated");
 
-  // Compute which last names appear for more than one golfer across all entries
-  const lastNameCounts = new Map<string, number>();
+  // Compute which last names belong to more than one distinct golfer across all entries.
+  // Deduplicate by full name first so a golfer picked by many teams only counts once.
+  const lastNameToGolfers = new Map<string, Set<string>>();
   for (const row of leaderboard) {
     for (const g of [...row.countingGolfers, ...row.benchGolfers]) {
       const last = lastName(g.name).toLowerCase();
-      lastNameCounts.set(last, (lastNameCounts.get(last) ?? 0) + 1);
+      const full = g.name.toLowerCase().trim();
+      if (!lastNameToGolfers.has(last)) lastNameToGolfers.set(last, new Set());
+      lastNameToGolfers.get(last)!.add(full);
     }
   }
   const dupLastNames = new Set(
-    [...lastNameCounts.entries()].filter(([, n]) => n > 1).map(([last]) => last)
+    [...lastNameToGolfers.entries()].filter(([, names]) => names.size > 1).map(([last]) => last)
   );
 
   function rankOf(row: LbRow): string {
