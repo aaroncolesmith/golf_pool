@@ -83,6 +83,11 @@ export type GolferScoreUpdate = {
   madeCut: boolean;
   /** Number of rounds started (0–4) */
   roundsComplete: number;
+  /** Stroke total for each completed round. null = round not yet played or partial. */
+  r1Score: number | null;
+  r2Score: number | null;
+  r3Score: number | null;
+  r4Score: number | null;
 };
 
 export type EspnSyncResult = {
@@ -121,6 +126,12 @@ function parseScoreToPar(raw: string | undefined): number {
   return isNaN(n) ? 0 : n;
 }
 
+function parseRoundStroke(ls: EspnLinescore | undefined): number | null {
+  if (!ls) return null;
+  const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
+  return typeof v === "number" && !isNaN(v) && v > 0 ? v : null;
+}
+
 // ---------------------------------------------------------------------------
 // Name normalisation (for matching against our golfers table)
 // ---------------------------------------------------------------------------
@@ -129,7 +140,7 @@ export function normalizeGolferName(name: string): string {
   return name
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // strip diacritics
+    .replace(/[̀-ͯ]/g, "") // strip diacritics
     .replace(/[^a-z\s'-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -158,7 +169,10 @@ function findBestEvent(events: EspnEvent[], tournamentName: string): EspnEvent |
   const exact = events.find((e) => normalizeGolferName(e.name) === target);
   if (exact) return exact;
 
-  // 2. Keyword overlap — find event whose name contains the most keywords from ours
+  // 2. Keyword overlap — find event whose name contains the most keywords from ours.
+  // Require at least one keyword to match; never fall back to an arbitrary event.
+  // (A blind events[0] fallback caused syncs to corrupt finished-tournament scores
+  // by matching against the next week's tournament.)
   let bestEvent: EspnEvent | null = null;
   let bestScore = 0;
 
@@ -173,8 +187,9 @@ function findBestEvent(events: EspnEvent[], tournamentName: string): EspnEvent |
 
   if (bestEvent && bestScore > 0) return bestEvent;
 
-  // 3. Fall back to the first (current) event
-  return events[0] ?? null;
+  // No match — return null so the caller can fall back gracefully rather than
+  // silently syncing the wrong tournament.
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,30 +222,97 @@ function computePositions(golfers: GolferScoreUpdate[]): GolferScoreUpdate[] {
 }
 
 // ---------------------------------------------------------------------------
-// Main fetch function
+// Core parse logic (shared between live and dated fetches)
 // ---------------------------------------------------------------------------
 
-/**
- * Fetch current PGA Tour scores from ESPN and find the best-matching event.
- *
- * @param tournamentName  The name stored on our Tournament record — used to
- *                        fuzzy-match against ESPN's event list.
- */
-export async function fetchEspnScores(tournamentName: string): Promise<EspnSyncResult | null> {
+function parseCompetitors(
+  competitors: EspnCompetitor[],
+  competitionPeriod: number,
+): GolferScoreUpdate[] {
+  const rawGolfers: GolferScoreUpdate[] = competitors.map((c) => {
+    const statusName = c.status?.type?.name ?? "";
+    const scoreValue = c.score ?? "";
+    const scoreTrimmed = scoreValue.trim().toUpperCase();
+
+    // --- Cut detection ---
+    const explicitCutLike =
+      CUT_STATUSES.has(statusName) ||
+      scoreTrimmed === "CUT" ||
+      scoreTrimmed === "WD" ||
+      scoreTrimmed === "DQ" ||
+      scoreTrimmed === "MDF";
+
+    const lsCount = c.linescores?.length ?? 0;
+    const inferredCut =
+      !explicitCutLike &&
+      competitionPeriod >= 3 &&
+      lsCount < 3;
+
+    const isCutLike = explicitCutLike || inferredCut;
+    const madeCut = !isCutLike;
+
+    // --- Rounds complete ---
+    const roundsComplete =
+      (c.linescores ?? []).filter((ls) => {
+        const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
+        return typeof v === "number" && !isNaN(v) && v > 0;
+      }).length || competitionPeriod;
+
+    // --- Per-round stroke totals (0-indexed linescore array) ---
+    // Only store a round's total when the value is a positive integer stroke count.
+    // ESPN fills unplayed rounds with 0 as a placeholder — those become null here.
+    const r1Score = parseRoundStroke(c.linescores?.[0]);
+    const r2Score = parseRoundStroke(c.linescores?.[1]);
+    const r3Score = parseRoundStroke(c.linescores?.[2]);
+    const r4Score = parseRoundStroke(c.linescores?.[3]);
+
+    // --- Position ---
+    let position: string;
+    if (!madeCut) {
+      if (statusName) {
+        position = positionFromStatus(statusName);
+      } else if (scoreTrimmed === "CUT" || scoreTrimmed === "WD" || scoreTrimmed === "DQ" || scoreTrimmed === "MDF") {
+        position = scoreTrimmed;
+      } else {
+        position = "CUT";
+      }
+    } else {
+      position = "TBD";
+    }
+
+    const scoreToParInt = parseScoreToPar(scoreValue);
+
+    return {
+      displayName: c.athlete.displayName,
+      scoreToParInt,
+      position,
+      madeCut,
+      roundsComplete,
+      r1Score,
+      r2Score,
+      r3Score,
+      r4Score,
+    };
+  });
+
+  return computePositions(rawGolfers);
+}
+
+// ---------------------------------------------------------------------------
+// Shared fetch helper
+// ---------------------------------------------------------------------------
+
+async function fetchAndParse(url: string, tournamentName: string): Promise<EspnSyncResult | null> {
   let data: EspnScoreboard;
 
   try {
-    const res = await fetch(
-      "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard",
-      {
-        // No caching — score syncs should always be fresh
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "Mozilla/5.0 (compatible; GolfPoolApp/1.0)",
-        },
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; GolfPoolApp/1.0)",
       },
-    );
+    });
 
     if (!res.ok) {
       console.error(`[espn] Scoreboard fetch failed: ${res.status} ${res.statusText}`);
@@ -247,86 +329,55 @@ export async function fetchEspnScores(tournamentName: string): Promise<EspnSyncR
   const event = findBestEvent(events, tournamentName);
 
   if (!event) {
-    console.warn(`[espn] No matching event found for "${tournamentName}"`);
+    console.warn(`[espn] No matching event found for "${tournamentName}" in ${events.map(e => e.name).join(", ") || "empty scoreboard"}`);
     return null;
   }
 
   const competition = event.competitions?.[0];
   const competitors = competition?.competitors ?? [];
-  // In the updated ESPN API, the current round lives on the competition status
   const competitionPeriod = competition?.status?.period ?? 0;
 
-  const rawGolfers: GolferScoreUpdate[] = competitors.map((c) => {
-    const statusName = c.status?.type?.name ?? "";
-    const scoreValue = c.score ?? "";
-    const scoreTrimmed = scoreValue.trim().toUpperCase();
-
-    // --- Cut detection ---
-    // Explicit: status field or score string says CUT/WD/DQ/MDF (old API + some new API cases)
-    const explicitCutLike =
-      CUT_STATUSES.has(statusName) ||
-      scoreTrimmed === "CUT" ||
-      scoreTrimmed === "WD" ||
-      scoreTrimmed === "DQ" ||
-      scoreTrimmed === "MDF";
-
-    // Inferred: in the current ESPN API, players who made the cut have placeholder
-    // linescore entries (value = 0) for rounds not yet played, keeping their
-    // linescores array at 4 slots. Players who missed the cut have no R3 entry —
-    // their array stops at 2. So if we're in R3+ and a player has <3 linescore
-    // slots, they didn't make the cut.
-    const lsCount = c.linescores?.length ?? 0;
-    const inferredCut =
-      !explicitCutLike &&
-      competitionPeriod >= 3 &&
-      lsCount < 3;
-
-    const isCutLike = explicitCutLike || inferredCut;
-    const madeCut = !isCutLike;
-
-    // --- Rounds complete ---
-    // Only count rounds with a score > 0. ESPN fills upcoming round slots with
-    // 0.0 as a placeholder, which must not be treated as a completed round.
-    const roundsComplete =
-      (c.linescores ?? []).filter((ls) => {
-        const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
-        return typeof v === "number" && !isNaN(v) && v > 0;
-      }).length || competitionPeriod;
-
-    // --- Position ---
-    let position: string;
-    if (!madeCut) {
-      if (statusName) {
-        position = positionFromStatus(statusName);
-      } else if (scoreTrimmed === "CUT" || scoreTrimmed === "WD" || scoreTrimmed === "DQ" || scoreTrimmed === "MDF") {
-        position = scoreTrimmed;
-      } else {
-        position = "CUT"; // inferred from linescore count
-      }
-    } else {
-      position = "TBD";
-    }
-
-    // --- Score ---
-    // For inferred cuts the score string is still a real score (e.g. "+12"), keep it.
-    // For explicit cuts where ESPN encodes the status as the score string, parse gives 0 (correct).
-    const scoreToParInt = parseScoreToPar(scoreValue);
-
-    return {
-      displayName: c.athlete.displayName,
-      scoreToParInt,
-      position,
-      madeCut,
-      roundsComplete,
-    };
-  });
-
-  const withPositions = computePositions(rawGolfers);
+  const golfers = parseCompetitors(competitors, competitionPeriod);
 
   return {
     eventId: event.id,
     eventName: event.name,
-    golfers: withPositions,
+    golfers,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Main fetch function (current scoreboard)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch current PGA Tour scores from ESPN and find the best-matching event.
+ *
+ * @param tournamentName  The name stored on our Tournament record — used to
+ *                        fuzzy-match against ESPN's event list.
+ */
+export async function fetchEspnScores(tournamentName: string): Promise<EspnSyncResult | null> {
+  return fetchAndParse(
+    "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard",
+    tournamentName,
+  );
+}
+
+/**
+ * Fetch PGA Tour scores from ESPN's dated scoreboard — used to re-sync
+ * historical or recently-finished tournaments that have left the current
+ * scoreboard.
+ *
+ * @param tournamentName  Tournament name for event matching.
+ * @param date            Date in YYYYMMDD format (e.g. "20250518" for May 18 2025).
+ */
+export async function fetchEspnScoresByDate(
+  tournamentName: string,
+  date: string,
+): Promise<EspnSyncResult | null> {
+  return fetchAndParse(
+    `https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?dates=${date}`,
+    tournamentName,
+  );
 }

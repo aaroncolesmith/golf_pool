@@ -931,6 +931,7 @@ function AdminTab({
   golferMap,
   isLocked,
   tournamentId,
+  tournamentStatus,
   scoresLastSyncedAt,
   onScoresSynced,
 }: {
@@ -938,21 +939,25 @@ function AdminTab({
   golferMap: Map<string, Golfer>;
   isLocked: boolean;
   tournamentId: string;
+  tournamentStatus: "upcoming" | "in_progress" | "finished";
   scoresLastSyncedAt: string | null;
   onScoresSynced: (ts: string) => void;
 }) {
   const { refreshGolfers } = useAppState();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [historicalDate, setHistoricalDate] = useState("");
 
-  async function handleSyncScores() {
+  async function handleSyncScores(date?: string) {
     setIsSyncing(true);
     setSyncMessage(null);
     try {
+      const body: { tournamentId: string; date?: string } = { tournamentId };
+      if (date) body.date = date;
       const res = await fetch("/api/scores/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tournamentId }),
+        body: JSON.stringify(body),
       });
       const data = (await res.json()) as {
         ok: boolean;
@@ -992,20 +997,55 @@ function AdminTab({
             color: "var(--muted)",
           }}
         >
-          Live Scores
+          Scores
         </p>
-        <div className="sync-controls">
-          <button
-            className="primary-button small-button"
-            onClick={handleSyncScores}
-            disabled={isSyncing}
-            type="button"
-          >
-            {isSyncing ? "Syncing…" : "↻ Sync from ESPN"}
-          </button>
-          {scoresLastSyncedAt && (
-            <span className="sync-timestamp">{formatLastSynced(scoresLastSyncedAt)}</span>
-          )}
+        {tournamentStatus !== "finished" && (
+          <div className="sync-controls">
+            <button
+              className="primary-button small-button"
+              onClick={() => void handleSyncScores()}
+              disabled={isSyncing}
+              type="button"
+            >
+              {isSyncing ? "Syncing…" : "↻ Sync from ESPN"}
+            </button>
+            {scoresLastSyncedAt && (
+              <span className="sync-timestamp">{formatLastSynced(scoresLastSyncedAt)}</span>
+            )}
+          </div>
+        )}
+        {/* Historical re-sync: always available so admin can fix stale final scores */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <p className="muted small">
+            {tournamentStatus === "finished"
+              ? "Tournament finished — use historical sync to correct final scores."
+              : "To fix scores after the tournament ends, use historical sync with the final round's date."}
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="text"
+              placeholder="YYYYMMDD (e.g. 20250518)"
+              value={historicalDate}
+              onChange={(e) => setHistoricalDate(e.target.value)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                color: "var(--text)",
+                fontSize: "0.85rem",
+                width: 190,
+              }}
+            />
+            <button
+              className="secondary-button small-button"
+              onClick={() => void handleSyncScores(historicalDate.trim())}
+              disabled={isSyncing || !historicalDate.trim()}
+              type="button"
+            >
+              {isSyncing ? "Syncing…" : "↻ Historical Sync"}
+            </button>
+          </div>
         </div>
         {syncMessage && <p className="muted small">{syncMessage}</p>}
       </div>
@@ -1639,6 +1679,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
             golferMap={golferMap}
             isLocked={isLocked}
             tournamentId={currentTournament.id}
+            tournamentStatus={currentTournament.status}
             scoresLastSyncedAt={localSyncedAt ?? state.scoresLastSyncedAt}
             onScoresSynced={setLocalSyncedAt}
           />

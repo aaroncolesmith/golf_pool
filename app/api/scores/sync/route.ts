@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-import { fetchEspnScores, normalizeGolferName } from "@/lib/espn";
+import { fetchEspnScores, fetchEspnScoresByDate, normalizeGolferName } from "@/lib/espn";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
  * POST /api/scores/sync
  *
- * Body: { tournamentId: string }
+ * Body: { tournamentId: string; date?: string }
  *
  * Fetches live scores from ESPN for the given tournament, matches golfers by
  * name, and writes score updates to Supabase.
+ *
+ * Pass `date` as "YYYYMMDD" to fetch from ESPN's dated scoreboard — useful for
+ * re-syncing a finished tournament after it has left the current scoreboard.
  *
  * Authentication required — any pool member can trigger a sync.
  *
@@ -17,14 +20,14 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  *   { ok: false, error: string }
  */
 export async function POST(request: Request) {
-  let body: { tournamentId?: string };
+  let body: { tournamentId?: string; date?: string };
   try {
-    body = (await request.json()) as { tournamentId?: string };
+    body = (await request.json()) as { tournamentId?: string; date?: string };
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid request body." }, { status: 400 });
   }
 
-  const { tournamentId } = body;
+  const { tournamentId, date } = body;
   if (!tournamentId || typeof tournamentId !== "string") {
     return NextResponse.json({ ok: false, error: "tournamentId is required." }, { status: 400 });
   }
@@ -42,7 +45,7 @@ export async function POST(request: Request) {
   // Load the tournament from Supabase to get the name for ESPN matching
   const { data: tournament, error: tError } = await supabase
     .from("tournaments")
-    .select("id, name")
+    .select("id, name, status")
     .eq("id", tournamentId)
     .single();
 
@@ -50,11 +53,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Tournament not found." }, { status: 404 });
   }
 
-  // Fetch ESPN scores
-  const espnResult = await fetchEspnScores(tournament.name as string);
+  // Fetch ESPN scores — use dated scoreboard when a date is provided (historical re-sync)
+  const espnResult = date
+    ? await fetchEspnScoresByDate(tournament.name as string, date)
+    : await fetchEspnScores(tournament.name as string);
+
   if (!espnResult) {
     return NextResponse.json(
-      { ok: false, error: "Unable to fetch scores from ESPN. The tournament may not be in progress." },
+      {
+        ok: false,
+        error: date
+          ? `Unable to fetch scores from ESPN for date ${date}. Try a date when the tournament was active (e.g. the final round date).`
+          : "Unable to fetch scores from ESPN. The tournament may not be in progress.",
+      },
       { status: 502 },
     );
   }
@@ -95,6 +106,10 @@ export async function POST(request: Request) {
     position: string;
     made_cut: boolean;
     rounds_complete: number;
+    r1_score: number | null;
+    r2_score: number | null;
+    r3_score: number | null;
+    r4_score: number | null;
   }> = [];
 
   const unmatched: string[] = [];
@@ -129,6 +144,10 @@ export async function POST(request: Request) {
       position: espnGolfer.position,
       made_cut: espnGolfer.madeCut,
       rounds_complete: espnGolfer.roundsComplete,
+      r1_score: espnGolfer.r1Score,
+      r2_score: espnGolfer.r2Score,
+      r3_score: espnGolfer.r3Score,
+      r4_score: espnGolfer.r4Score,
     });
   }
 
@@ -150,16 +169,16 @@ export async function POST(request: Request) {
     }
   }
 
-  // Stamp scores_updated_at on the tournament
+  // Stamp scores_updated_at and persist the ESPN event ID for future lookups
   await supabase
     .from("tournaments")
-    .update({ scores_updated_at: espnResult.fetchedAt })
+    .update({ scores_updated_at: espnResult.fetchedAt, espn_event_id: espnResult.eventId })
     .eq("id", tournamentId);
 
   return NextResponse.json({
     ok: true,
     eventName: espnResult.eventName,
-    updated: updates.length,
+    updated: dedupedUpdates.length,
     unmatched,
     fetchedAt: espnResult.fetchedAt,
   });

@@ -5,8 +5,13 @@ import { normalizeGolferName } from "@/lib/espn";
 /**
  * GET /api/scores/tournament?tournamentId=xxx
  *
- * Returns full tournament leaderboard data from ESPN, including per-round
- * stroke counts, today's score, position, and cut status.
+ * Returns full tournament leaderboard data including per-round stroke counts,
+ * today's score, position, and cut status.
+ *
+ * For finished tournaments the response is served entirely from the database so
+ * the data is stable and consistent regardless of what ESPN's current scoreboard
+ * shows. For in-progress tournaments ESPN is tried first; the DB is the fallback
+ * if ESPN cannot find the event.
  *
  * No authentication required — this is public data.
  */
@@ -121,6 +126,7 @@ function findBestEvent(events: EspnEvent[], tournamentName: string): EspnEvent |
     }
   }
 
+  // Require at least one keyword to match — never silently serve the wrong event.
   if (bestEvent && bestScore > 0) return bestEvent;
   return null;
 }
@@ -129,6 +135,67 @@ function parseRoundScore(value: number | string | undefined): number | null {
   if (value === undefined || value === null) return null;
   const n = typeof value === "string" ? parseFloat(value) : value;
   return isFinite(n) && !isNaN(n) ? n : null;
+}
+
+// ---------------------------------------------------------------------------
+// DB fallback: build TournamentGolfer[] from the golfers table
+// ---------------------------------------------------------------------------
+
+type DbGolfer = {
+  name: string;
+  current_score_to_par: number;
+  position: string;
+  made_cut: boolean;
+  rounds_complete: number;
+  r1_score: number | null;
+  r2_score: number | null;
+  r3_score: number | null;
+  r4_score: number | null;
+};
+
+function buildFromDb(dbGolfers: DbGolfer[]): TournamentGolfer[] {
+  // Recompute positions from stored scores so ties are labelled correctly.
+  const active = dbGolfers
+    .filter((g) => g.made_cut)
+    .sort((a, b) => a.current_score_to_par - b.current_score_to_par);
+
+  const scoreToPos = new Map<number, string>();
+  let i = 0;
+  while (i < active.length) {
+    const score = active[i].current_score_to_par;
+    const tied = active.filter((g) => g.current_score_to_par === score);
+    const pos = tied.length > 1 ? `T${i + 1}` : `${i + 1}`;
+    scoreToPos.set(score, pos);
+    i += tied.length;
+  }
+
+  return dbGolfers.map((g): TournamentGolfer => {
+    let position: string;
+    if (!g.made_cut) {
+      position = g.position; // CUT / WD / DQ as stored
+    } else {
+      position = scoreToPos.get(g.current_score_to_par) ?? g.position;
+    }
+
+    // thru: "F" when all rounds are complete and the player made the cut
+    let thru = "-";
+    if (g.made_cut) {
+      thru = g.rounds_complete >= 4 ? "F" : `R${g.rounds_complete}`;
+    }
+
+    return {
+      name: g.name,
+      position,
+      score: g.current_score_to_par,
+      today: null, // not derivable from DB without par
+      thru,
+      r1: g.r1_score,
+      r2: g.r2_score,
+      r3: g.r3_score,
+      r4: g.r4_score,
+      madeCut: g.made_cut,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -143,11 +210,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "tournamentId is required." }, { status: 400 });
   }
 
-  // Load tournament name from Supabase
   const supabase = await createSupabaseServerClient();
+
+  // Load tournament — status determines whether we go to ESPN or straight to DB
   const { data: tournament, error: tError } = await supabase
     .from("tournaments")
-    .select("id, name")
+    .select("id, name, status")
     .eq("id", tournamentId)
     .single();
 
@@ -155,7 +223,34 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Tournament not found." }, { status: 404 });
   }
 
-  // Fetch ESPN scoreboard
+  const isFinished = tournament.status === "finished";
+
+  // Helper: fetch from DB and return
+  async function returnFromDb(): Promise<NextResponse> {
+    const { data: dbGolfers, error: gErr } = await supabase
+      .from("golfers")
+      .select("name, current_score_to_par, position, made_cut, rounds_complete, r1_score, r2_score, r3_score, r4_score")
+      .eq("tournament_id", tournamentId!)
+      .order("current_score_to_par", { ascending: true });
+
+    if (gErr || !dbGolfers || dbGolfers.length === 0) {
+      return NextResponse.json(
+        { ok: false, error: "Tournament leaderboard not yet available. Check back once the tournament begins." },
+        { status: 404 },
+      );
+    }
+
+    const golfers = buildFromDb(dbGolfers as DbGolfer[]);
+    return NextResponse.json({ ok: true, golfers, source: "db" });
+  }
+
+  // For finished tournaments always use the DB — ESPN's scoreboard no longer
+  // has the event and the DB holds the authoritative final scores.
+  if (isFinished) {
+    return returnFromDb();
+  }
+
+  // For live/upcoming tournaments, try ESPN first
   let espnData: EspnScoreboard;
   try {
     const res = await fetch(
@@ -170,26 +265,23 @@ export async function GET(request: Request) {
     );
 
     if (!res.ok) {
-      return NextResponse.json(
-        { ok: false, error: `ESPN fetch failed: ${res.status} ${res.statusText}` },
-        { status: 502 },
-      );
+      console.warn(`[tournament] ESPN fetch failed: ${res.status} — falling back to DB`);
+      return returnFromDb();
     }
 
     espnData = (await res.json()) as EspnScoreboard;
   } catch (err) {
     console.error("[tournament] ESPN fetch error:", err);
-    return NextResponse.json({ ok: false, error: "Failed to fetch ESPN data." }, { status: 502 });
+    return returnFromDb();
   }
 
   const events = espnData.events ?? [];
   const event = findBestEvent(events, tournament.name as string);
 
+  // If ESPN doesn't have this tournament, fall back to DB
   if (!event) {
-    return NextResponse.json(
-      { ok: false, error: "Tournament leaderboard not yet available. Check back once the tournament begins." },
-      { status: 404 },
-    );
+    console.warn(`[tournament] Event not found on ESPN scoreboard — falling back to DB for "${tournament.name}"`);
+    return returnFromDb();
   }
 
   const competition = event.competitions?.[0];
@@ -197,10 +289,7 @@ export async function GET(request: Request) {
   const competitionStatus = competition?.status;
   const currentPeriod = competitionStatus?.period ?? 1;
 
-  // Derive course par per round from competitors who haven't started the current
-  // round yet — their cumulative score reflects only completed rounds, making the
-  // arithmetic unambiguous. Avoids the PAR_PER_ROUND=72 assumption that breaks on
-  // courses like Quail Hollow (par 70).
+  // Derive course par per round dynamically to avoid the par-70/72 assumption
   let coursePar = 72;
   if (currentPeriod >= 2) {
     const parSamples: number[] = [];
@@ -238,7 +327,6 @@ export async function GET(request: Request) {
     const scoreValue = c.score ?? "";
     const scoreTrimmed = scoreValue.trim().toUpperCase();
 
-    // Explicit cut: status field or score string says CUT/WD/DQ/MDF
     const explicitCutLike =
       CUT_STATUSES.has(statusName) ||
       scoreTrimmed === "CUT" ||
@@ -246,10 +334,6 @@ export async function GET(request: Request) {
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
 
-    // Inferred cut: in the current ESPN API, linescores is an index-based array
-    // (no .period field). Made-cut players have 4 slots (0-placeholder for unplayed
-    // rounds); missed-cut players stop at 2. If we're in R3+ and a player has <3
-    // linescore entries, they didn't make the cut.
     const lsCount = c.linescores?.length ?? 0;
     const inferredCut = !explicitCutLike && currentPeriod >= 3 && lsCount < 3;
 
@@ -257,10 +341,6 @@ export async function GET(request: Request) {
     const madeCut = !isCutLike;
     const scoreToParInt = parseScoreToPar(scoreValue);
 
-    // Round scores: linescores array is 0-indexed (index 0 = R1, 1 = R2, etc.)
-    // Past rounds are always complete. The current round is only stored once all
-    // 18 holes are done — ESPN emits a running partial stroke count (e.g. 45
-    // through 13 holes) that must not be treated as a final round score.
     const roundScores: Record<number, number | null> = {};
     if (c.linescores) {
       c.linescores.forEach((ls, idx) => {
@@ -273,13 +353,9 @@ export async function GET(request: Request) {
           const holesPlayed = ls.linescores?.length ?? 0;
           if (holesPlayed >= 18) roundScores[roundNum] = val;
         }
-        // Future rounds skipped
       });
     }
 
-    // Thru: derive from the nested per-hole linescores inside the current round.
-    // ESPN nests hole-by-hole scores under each round's top-level linescore.
-    // Use array index (currentPeriod - 1) since linescores have no .period field.
     let thru = "-";
     if (madeCut) {
       const currentRoundLS = c.linescores?.[currentPeriod - 1];
@@ -291,11 +367,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // Today: to-par for the current round.
-    // Formula: today = totalTopar − sum of completed previous rounds' to-par
-    // Uses coursePar derived dynamically above rather than a hardcoded 72.
     let today: number | null = null;
-
     if (madeCut && thru !== "-") {
       let completedTopar = 0;
       for (let p = 1; p < currentPeriod; p++) {
@@ -307,7 +379,6 @@ export async function GET(request: Request) {
       today = scoreToParInt - completedTopar;
     }
 
-    // Position for cut players
     let position: string;
     if (!madeCut) {
       if (statusName === "STATUS_WD" || scoreTrimmed === "WD") position = "WD";
@@ -332,7 +403,7 @@ export async function GET(request: Request) {
     };
   });
 
-  // Derive tie positions for active players from sorted scores
+  // Derive tie positions for active players
   const active = rawGolfers.filter((g) => g.madeCut).sort((a, b) => a._scoreToParInt - b._scoreToParInt);
   const scoreToPosition = new Map<number, string>();
   let i = 0;
@@ -351,5 +422,5 @@ export async function GET(request: Request) {
     return g;
   });
 
-  return NextResponse.json({ ok: true, golfers });
+  return NextResponse.json({ ok: true, golfers, source: "espn" });
 }

@@ -101,6 +101,10 @@ export async function GET(request: Request) {
         position: string;
         made_cut: boolean;
         rounds_complete: number;
+        r1_score: number | null;
+        r2_score: number | null;
+        r3_score: number | null;
+        r4_score: number | null;
       }> = [];
       const unmatched: string[] = [];
 
@@ -134,6 +138,10 @@ export async function GET(request: Request) {
           position: espnGolfer.position,
           made_cut: espnGolfer.madeCut,
           rounds_complete: espnGolfer.roundsComplete,
+          r1_score: espnGolfer.r1Score,
+          r2_score: espnGolfer.r2Score,
+          r3_score: espnGolfer.r3Score,
+          r4_score: espnGolfer.r4Score,
         });
       }
 
@@ -149,10 +157,10 @@ export async function GET(request: Request) {
         }
       }
 
-      // Stamp scores_updated_at
+      // Stamp scores_updated_at and persist the ESPN event ID for future lookups
       await supabase
         .from("tournaments")
-        .update({ scores_updated_at: espnResult.fetchedAt })
+        .update({ scores_updated_at: espnResult.fetchedAt, espn_event_id: espnResult.eventId })
         .eq("id", tournament.id);
 
       console.log(
