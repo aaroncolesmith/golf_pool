@@ -125,6 +125,7 @@ as $$
   );
 $$;
 
+drop function if exists public.join_pool_by_code(text);
 create or replace function public.join_pool_by_code(input_code text)
 returns table (
   id uuid,

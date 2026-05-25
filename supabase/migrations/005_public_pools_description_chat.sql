@@ -38,7 +38,8 @@ create policy "members can insert pool messages"
   to authenticated
   with check (auth.uid() = user_id and public.is_pool_member(pool_id));
 
--- Update join_pool_by_code to return new fields
+-- Update join_pool_by_code to return new fields (must drop first — return type changed)
+drop function if exists public.join_pool_by_code(text);
 create or replace function public.join_pool_by_code(input_code text)
 returns table (
   id uuid,
