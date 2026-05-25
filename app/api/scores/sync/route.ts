@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchEspnScores, fetchEspnScoresByDate, normalizeGolferName } from "@/lib/espn";
+import { fetchEspnScores, fetchEspnScoresByDate, fetchEspnScoresByEventId, normalizeGolferName } from "@/lib/espn";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
@@ -20,14 +20,14 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  *   { ok: false, error: string }
  */
 export async function POST(request: Request) {
-  let body: { tournamentId?: string; date?: string };
+  let body: { tournamentId?: string; date?: string; espnEventId?: string };
   try {
-    body = (await request.json()) as { tournamentId?: string; date?: string };
+    body = (await request.json()) as { tournamentId?: string; date?: string; espnEventId?: string };
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid request body." }, { status: 400 });
   }
 
-  const { tournamentId, date } = body;
+  const { tournamentId, date, espnEventId } = body;
   if (!tournamentId || typeof tournamentId !== "string") {
     return NextResponse.json({ ok: false, error: "tournamentId is required." }, { status: 400 });
   }
@@ -53,18 +53,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Tournament not found." }, { status: 404 });
   }
 
-  // Fetch ESPN scores — use dated scoreboard when a date is provided (historical re-sync)
-  const espnResult = date
-    ? await fetchEspnScoresByDate(tournament.name as string, date)
-    : await fetchEspnScores(tournament.name as string);
+  // Fetch ESPN scores — prefer direct event ID, then dated scoreboard, then current
+  const espnResult = espnEventId
+    ? await fetchEspnScoresByEventId(espnEventId, tournament.name as string)
+    : date
+      ? await fetchEspnScoresByDate(tournament.name as string, date)
+      : await fetchEspnScores(tournament.name as string);
 
   if (!espnResult) {
     return NextResponse.json(
       {
         ok: false,
-        error: date
-          ? `Unable to fetch scores from ESPN for date ${date}. Try a date when the tournament was active (e.g. the final round date).`
-          : "Unable to fetch scores from ESPN. The tournament may not be in progress.",
+        error: espnEventId
+          ? `Unable to fetch scores for ESPN event ID "${espnEventId}". Double-check the ID from the ESPN leaderboard URL.`
+          : date
+            ? `Unable to fetch scores from ESPN for date ${date}. Try a date when the tournament was active (e.g. the final round date).`
+            : "Unable to fetch scores from ESPN. The tournament may not be in progress.",
       },
       { status: 502 },
     );

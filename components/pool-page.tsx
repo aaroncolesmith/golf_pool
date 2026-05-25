@@ -1145,17 +1145,19 @@ function AdminTab({
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [historicalDate, setHistoricalDate] = useState("");
+  const [espnEventId, setEspnEventId] = useState("");
   const [descDraft, setDescDraft] = useState(currentPool.description ?? "");
   const [isSavingDesc, setIsSavingDesc] = useState(false);
   const [descMessage, setDescMessage] = useState<string | null>(null);
   const [isTogglingVisibility, setIsTogglingVisibility] = useState(false);
 
-  async function handleSyncScores(date?: string) {
+  async function handleSyncScores(date?: string, eventId?: string) {
     setIsSyncing(true);
     setSyncMessage(null);
     try {
-      const body: { tournamentId: string; date?: string } = { tournamentId };
+      const body: { tournamentId: string; date?: string; espnEventId?: string } = { tournamentId };
       if (date) body.date = date;
+      if (eventId) body.espnEventId = eventId;
       const res = await fetch("/api/scores/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1323,6 +1325,37 @@ function AdminTab({
               type="button"
             >
               {isSyncing ? "Syncing…" : "↻ Historical Sync"}
+            </button>
+          </div>
+        </div>
+        {/* ESPN Event ID sync — most reliable for finished tournaments */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <p className="muted small">
+            <strong>ESPN Event ID sync</strong> — most reliable for finished tournaments. Find the ID in the ESPN leaderboard URL: <code>espn.com/golf/leaderboard?tournamentId=<strong>401703526</strong></code>
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="text"
+              placeholder="e.g. 401703526"
+              value={espnEventId}
+              onChange={(e) => setEspnEventId(e.target.value.trim())}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                color: "var(--text)",
+                fontSize: "0.85rem",
+                width: 160,
+              }}
+            />
+            <button
+              className="secondary-button small-button"
+              onClick={() => void handleSyncScores(undefined, espnEventId.trim())}
+              disabled={isSyncing || !espnEventId.trim()}
+              type="button"
+            >
+              {isSyncing ? "Syncing…" : "↻ Sync by Event ID"}
             </button>
           </div>
         </div>

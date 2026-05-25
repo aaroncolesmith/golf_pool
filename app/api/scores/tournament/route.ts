@@ -99,10 +99,9 @@ function parseScoreToPar(raw: string | undefined): number {
 
 function scoreKeywords(name: string): string[] {
   const normalized = normalizeGolferName(name);
-  const stopWords = new Set(["the", "pga", "tour", "championship", "open", "of", "at", "in"]);
-  return normalized
-    .split(" ")
-    .filter((w) => w.length > 2 && !stopWords.has(w));
+  const stopWords = new Set(["the", "tour", "of", "at", "in", "presented", "by", "hosted"]);
+  const filtered = normalized.split(" ").filter((w) => w.length > 2 && !stopWords.has(w));
+  return filtered.length > 0 ? filtered : normalized.split(" ").filter((w) => w.length > 2);
 }
 
 function findBestEvent(events: EspnEvent[], tournamentName: string): EspnEvent | null {

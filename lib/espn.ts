@@ -152,11 +152,10 @@ export function normalizeGolferName(name: string): string {
 
 function scoreKeywords(name: string): string[] {
   const normalized = normalizeGolferName(name);
-  // Remove common stop-words that don't distinguish tournaments
-  const stopWords = new Set(["the", "pga", "tour", "championship", "open", "of", "at", "in"]);
-  return normalized
-    .split(" ")
-    .filter((w) => w.length > 2 && !stopWords.has(w));
+  const stopWords = new Set(["the", "tour", "of", "at", "in", "presented", "by", "hosted"]);
+  const filtered = normalized.split(" ").filter((w) => w.length > 2 && !stopWords.has(w));
+  // If filtering wipes out all keywords (e.g. "PGA Championship"), use everything
+  return filtered.length > 0 ? filtered : normalized.split(" ").filter((w) => w.length > 2);
 }
 
 function findBestEvent(events: EspnEvent[], tournamentName: string): EspnEvent | null {
@@ -378,6 +377,26 @@ export async function fetchEspnScoresByDate(
 ): Promise<EspnSyncResult | null> {
   return fetchAndParse(
     `https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?dates=${date}`,
+    tournamentName,
+  );
+}
+
+/**
+ * Fetch PGA Tour scores directly by ESPN event ID — the most reliable way to
+ * sync a finished tournament since it bypasses name-matching entirely.
+ *
+ * The ESPN event ID appears in the URL of the event's ESPN page:
+ * e.g. https://www.espn.com/golf/leaderboard?tournamentId=401703526  → ID is 401703526
+ *
+ * @param espnEventId  The numeric ESPN event/tournament ID.
+ * @param tournamentName  Tournament name — used only for the returned eventName field.
+ */
+export async function fetchEspnScoresByEventId(
+  espnEventId: string,
+  tournamentName: string,
+): Promise<EspnSyncResult | null> {
+  return fetchAndParse(
+    `https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?event=${espnEventId}`,
     tournamentName,
   );
 }
