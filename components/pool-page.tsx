@@ -1144,6 +1144,7 @@ function AdminTab({
   const { refreshGolfers, updatePoolDescription, updatePoolVisibility } = useAppState();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [showAdvancedSync, setShowAdvancedSync] = useState(false);
   const [historicalDate, setHistoricalDate] = useState("");
   const [espnEventId, setEspnEventId] = useState("");
   const [descDraft, setDescDraft] = useState(currentPool.description ?? "");
@@ -1269,97 +1270,91 @@ function AdminTab({
 
       {/* Score sync */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <p
-          style={{
-            fontSize: "0.75rem",
-            fontWeight: 800,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            color: "var(--muted)",
-          }}
-        >
+        <p style={{ fontSize: "0.75rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)" }}>
           Scores
         </p>
-        {tournamentStatus !== "finished" && (
-          <div className="sync-controls">
-            <button
-              className="primary-button small-button"
-              onClick={() => void handleSyncScores()}
-              disabled={isSyncing}
-              type="button"
-            >
-              {isSyncing ? "Syncing…" : "↻ Sync from ESPN"}
-            </button>
-            {scoresLastSyncedAt && (
-              <span className="sync-timestamp">{formatLastSynced(scoresLastSyncedAt)}</span>
-            )}
+
+        <div className="sync-controls">
+          <button
+            className="primary-button small-button"
+            onClick={() => void handleSyncScores()}
+            disabled={isSyncing}
+            type="button"
+          >
+            {isSyncing ? "Syncing…" : tournamentStatus === "finished" ? "↻ Re-sync Final Scores" : "↻ Sync from ESPN"}
+          </button>
+          {scoresLastSyncedAt && (
+            <span className="sync-timestamp">{formatLastSynced(scoresLastSyncedAt)}</span>
+          )}
+        </div>
+
+        {tournamentStatus === "finished" && (
+          <p className="muted small" style={{ margin: 0 }}>
+            Automatically finds final scores from ESPN using the tournament dates.
+          </p>
+        )}
+
+        {syncMessage && (
+          <p className={syncMessage.startsWith("Sync failed") ? "muted small" : "muted small"} style={{ margin: 0, color: syncMessage.startsWith("Sync failed") ? "var(--danger)" : "inherit" }}>
+            {syncMessage}
+          </p>
+        )}
+
+        {/* Advanced: collapsed by default */}
+        <button
+          type="button"
+          style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, fontSize: "0.78rem", color: "var(--muted)", fontWeight: 600 }}
+          onClick={() => setShowAdvancedSync((v) => !v)}
+        >
+          {showAdvancedSync ? "▾" : "▸"} Advanced sync options
+        </button>
+
+        {showAdvancedSync && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px", background: "var(--surface-raised, #f7f8fa)", borderRadius: 10, border: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <p style={{ fontSize: "0.78rem", fontWeight: 700, margin: 0 }}>Sync by date</p>
+              <p className="muted small" style={{ margin: 0 }}>Override auto-detect with a specific date (YYYYMMDD).</p>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  placeholder="e.g. 20260518"
+                  value={historicalDate}
+                  onChange={(e) => setHistoricalDate(e.target.value)}
+                  style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "0.85rem", width: 160 }}
+                />
+                <button
+                  className="secondary-button small-button"
+                  onClick={() => void handleSyncScores(historicalDate.trim())}
+                  disabled={isSyncing || !historicalDate.trim()}
+                  type="button"
+                >
+                  {isSyncing ? "Syncing…" : "Sync by Date"}
+                </button>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <p style={{ fontSize: "0.78rem", fontWeight: 700, margin: 0 }}>Sync by ESPN event ID</p>
+              <p className="muted small" style={{ margin: 0 }}>From the ESPN leaderboard URL: <code>espn.com/golf/leaderboard?tournamentId=<strong>XXXXXXX</strong></code></p>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  placeholder="e.g. 401703526"
+                  value={espnEventId}
+                  onChange={(e) => setEspnEventId(e.target.value.trim())}
+                  style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "0.85rem", width: 160 }}
+                />
+                <button
+                  className="secondary-button small-button"
+                  onClick={() => void handleSyncScores(undefined, espnEventId.trim())}
+                  disabled={isSyncing || !espnEventId.trim()}
+                  type="button"
+                >
+                  {isSyncing ? "Syncing…" : "Sync by ID"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
-        {/* Historical re-sync: always available so admin can fix stale final scores */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <p className="muted small">
-            {tournamentStatus === "finished"
-              ? "Tournament finished — use historical sync to correct final scores."
-              : "To fix scores after the tournament ends, use historical sync with the final round's date."}
-          </p>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              type="text"
-              placeholder="YYYYMMDD (e.g. 20250518)"
-              value={historicalDate}
-              onChange={(e) => setHistoricalDate(e.target.value)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                color: "var(--text)",
-                fontSize: "0.85rem",
-                width: 190,
-              }}
-            />
-            <button
-              className="secondary-button small-button"
-              onClick={() => void handleSyncScores(historicalDate.trim())}
-              disabled={isSyncing || !historicalDate.trim()}
-              type="button"
-            >
-              {isSyncing ? "Syncing…" : "↻ Historical Sync"}
-            </button>
-          </div>
-        </div>
-        {/* ESPN Event ID sync — most reliable for finished tournaments */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <p className="muted small">
-            <strong>ESPN Event ID sync</strong> — most reliable for finished tournaments. Find the ID in the ESPN leaderboard URL: <code>espn.com/golf/leaderboard?tournamentId=<strong>401703526</strong></code>
-          </p>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              type="text"
-              placeholder="e.g. 401703526"
-              value={espnEventId}
-              onChange={(e) => setEspnEventId(e.target.value.trim())}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                color: "var(--text)",
-                fontSize: "0.85rem",
-                width: 160,
-              }}
-            />
-            <button
-              className="secondary-button small-button"
-              onClick={() => void handleSyncScores(undefined, espnEventId.trim())}
-              disabled={isSyncing || !espnEventId.trim()}
-              type="button"
-            >
-              {isSyncing ? "Syncing…" : "↻ Sync by Event ID"}
-            </button>
-          </div>
-        </div>
-        {syncMessage && <p className="muted small">{syncMessage}</p>}
       </div>
 
       {/* Danger zone — delete tournament */}

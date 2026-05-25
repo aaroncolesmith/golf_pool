@@ -42,10 +42,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Authentication required." }, { status: 401 });
   }
 
-  // Load the tournament from Supabase to get the name for ESPN matching
+  // Load the tournament — get start_date and espn_event_id for smart sync
   const { data: tournament, error: tError } = await supabase
     .from("tournaments")
-    .select("id, name, status")
+    .select("id, name, status, start_date, espn_event_id")
     .eq("id", tournamentId)
     .single();
 
@@ -53,12 +53,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Tournament not found." }, { status: 404 });
   }
 
-  // Fetch ESPN scores — prefer direct event ID, then dated scoreboard, then current
-  const espnResult = espnEventId
-    ? await fetchEspnScoresByEventId(espnEventId, tournament.name as string)
-    : date
-      ? await fetchEspnScoresByDate(tournament.name as string, date)
-      : await fetchEspnScores(tournament.name as string);
+  const tName = tournament.name as string;
+
+  // Build a prioritized list of fetch strategies and try them in order until one works.
+  // This means admins never need to manually find dates or event IDs.
+  type Strategy = () => Promise<Awaited<ReturnType<typeof fetchEspnScores>>>;
+  const strategies: Strategy[] = [];
+
+  if (espnEventId) {
+    // Explicit event ID always wins when provided
+    strategies.push(() => fetchEspnScoresByEventId(espnEventId, tName));
+  } else if (date) {
+    // Explicit date provided
+    strategies.push(() => fetchEspnScoresByDate(tName, date));
+  } else {
+    // Auto mode: try every available signal in order of reliability
+    const storedEventId = tournament.espn_event_id as string | null;
+    if (storedEventId) {
+      strategies.push(() => fetchEspnScoresByEventId(storedEventId, tName));
+    }
+
+    // Try current scoreboard (works for live/upcoming)
+    strategies.push(() => fetchEspnScores(tName));
+
+    // For finished/locked tournaments, also try dates around the final round.
+    // PGA Tour events run Thu–Sun, so final round ≈ start_date + 3 days.
+    // We try +3 (Sun), +2 (Sat), +4 (Mon makeup), +1 (Fri) as fallbacks.
+    const startDateStr = tournament.start_date as string | null;
+    if (startDateStr) {
+      const startDate = new Date(startDateStr);
+      for (const offset of [3, 2, 4, 1]) {
+        const candidate = new Date(startDate);
+        candidate.setUTCDate(candidate.getUTCDate() + offset);
+        const yyyymmdd = candidate.toISOString().slice(0, 10).replace(/-/g, "");
+        strategies.push(() => fetchEspnScoresByDate(tName, yyyymmdd));
+      }
+    }
+  }
+
+  let espnResult: Awaited<ReturnType<typeof fetchEspnScores>> = null;
+  for (const strategy of strategies) {
+    espnResult = await strategy();
+    if (espnResult) break;
+  }
 
   if (!espnResult) {
     return NextResponse.json(
@@ -67,8 +104,8 @@ export async function POST(request: Request) {
         error: espnEventId
           ? `Unable to fetch scores for ESPN event ID "${espnEventId}". Double-check the ID from the ESPN leaderboard URL.`
           : date
-            ? `Unable to fetch scores from ESPN for date ${date}. Try a date when the tournament was active (e.g. the final round date).`
-            : "Unable to fetch scores from ESPN. The tournament may not be in progress.",
+            ? `No ESPN data found for date ${date}. Try a different date when the tournament was active.`
+            : "Unable to find this tournament on ESPN. It may not have started yet, or ESPN's data is temporarily unavailable.",
       },
       { status: 502 },
     );
