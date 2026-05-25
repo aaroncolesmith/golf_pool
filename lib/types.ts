@@ -72,6 +72,16 @@ export type Pool = {
   lockAt: string;
   tiers: Tier[];
   tiersSubmittedAt: string | null;
+  isPublic: boolean;
+  description: string | null;
+};
+
+export type PoolMessage = {
+  id: string;
+  poolId: string;
+  userId: string;
+  message: string;
+  createdAt: string;
 };
 
 export type AppState = {

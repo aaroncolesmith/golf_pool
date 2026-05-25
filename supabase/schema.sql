@@ -43,6 +43,8 @@ create table if not exists public.pools (
   invited_emails text[] not null default '{}',
   lock_at timestamptz not null,
   tiers jsonb not null default '[]'::jsonb,
+  is_public boolean not null default false,
+  description text,
   created_at timestamptz not null default timezone('utc', now())
 );
 
@@ -51,6 +53,14 @@ create table if not exists public.pool_members (
   user_id uuid not null references public.profiles (id) on delete cascade,
   joined_at timestamptz not null default timezone('utc', now()),
   primary key (pool_id, user_id)
+);
+
+create table if not exists public.pool_messages (
+  id uuid primary key default gen_random_uuid(),
+  pool_id uuid not null references public.pools (id) on delete cascade,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  message text not null check (char_length(message) <= 1000),
+  created_at timestamptz not null default timezone('utc', now())
 );
 
 create table if not exists public.pool_entries (
@@ -125,7 +135,9 @@ returns table (
   invited_emails text[],
   created_at timestamptz,
   lock_at timestamptz,
-  tiers jsonb
+  tiers jsonb,
+  is_public boolean,
+  description text
 )
 language plpgsql
 security definer
@@ -163,7 +175,9 @@ begin
     target_pool.invited_emails,
     target_pool.created_at,
     target_pool.lock_at,
-    target_pool.tiers;
+    target_pool.tiers,
+    target_pool.is_public,
+    target_pool.description;
 end;
 $$;
 
@@ -180,6 +194,7 @@ alter table public.golfers enable row level security;
 alter table public.pools enable row level security;
 alter table public.pool_members enable row level security;
 alter table public.pool_entries enable row level security;
+alter table public.pool_messages enable row level security;
 
 drop policy if exists "profiles are viewable by authenticated users" on public.profiles;
 drop policy if exists "users can insert their own profile" on public.profiles;
@@ -204,6 +219,10 @@ drop policy if exists "members can view pool memberships" on public.pool_members
 drop policy if exists "members can view pool entries" on public.pool_entries;
 drop policy if exists "users can manage their own entries" on public.pool_entries;
 drop policy if exists "users can update their own entries" on public.pool_entries;
+
+drop policy if exists "public pools are viewable by authenticated users" on public.pools;
+drop policy if exists "members can view pool messages" on public.pool_messages;
+drop policy if exists "members can insert pool messages" on public.pool_messages;
 
 create policy "profiles are viewable by authenticated users"
   on public.profiles for select
@@ -305,3 +324,18 @@ create policy "users can update their own entries"
   to authenticated
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+create policy "public pools are viewable by authenticated users"
+  on public.pools for select
+  to authenticated
+  using (is_public = true);
+
+create policy "members can view pool messages"
+  on public.pool_messages for select
+  to authenticated
+  using (public.is_pool_member(pool_messages.pool_id));
+
+create policy "members can insert pool messages"
+  on public.pool_messages for insert
+  to authenticated
+  with check (auth.uid() = user_id and public.is_pool_member(pool_id));

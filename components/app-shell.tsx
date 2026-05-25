@@ -186,11 +186,16 @@ function Dashboard() {
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [joinMessage, setJoinMessage] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
+  const [joiningPublicPoolId, setJoiningPublicPoolId] = useState<string | null>(null);
 
   if (!currentUser) return null;
 
   const poolsForUser = state.pools.filter((pool) =>
     pool.memberUserIds.includes(currentUser.id),
+  );
+
+  const discoverablePools = state.pools.filter(
+    (pool) => pool.isPublic && !pool.memberUserIds.includes(currentUser.id),
   );
 
   async function handleJoinPool() {
@@ -204,6 +209,13 @@ function Dashboard() {
       return;
     }
     router.push(`/pools/${pool.id}`);
+  }
+
+  async function handleJoinPublicPool(poolCode: string, poolId: string) {
+    setJoiningPublicPoolId(poolId);
+    const pool = await joinPool(poolCode);
+    setJoiningPublicPoolId(null);
+    if (pool) router.push(`/pools/${pool.id}`);
   }
 
   const firstName = currentUser.userName.split(" ")[0] ?? currentUser.userName;
@@ -357,9 +369,66 @@ function Dashboard() {
         )}
       </section>
 
+      {/* ── Discoverable public pools ─────────────────────────────────────── */}
+      {discoverablePools.length > 0 && (
+        <section className="dashboard-table-panel">
+          <div className="dashboard-section-head">
+            <h2>Open Pools</h2>
+            <span className="panel-kicker">Anyone can join</span>
+          </div>
+          <div className="pool-card-list">
+            {discoverablePools.map((pool) => {
+              const tournament = state.tournaments.find((t) => t.id === pool.tournamentId);
+              const statusLabel =
+                tournament?.status === "finished"
+                  ? "Done"
+                  : tournament?.status === "in_progress"
+                    ? "Live"
+                    : "Upcoming";
+              const statusClass =
+                tournament?.status === "finished"
+                  ? "completed"
+                  : tournament?.status === "in_progress"
+                    ? "live"
+                    : "pending";
+
+              return (
+                <div className="pool-card" key={pool.id} style={{ cursor: "default" }}>
+                  <div className="pool-card-body">
+                    <span className="pool-card-tournament">
+                      {tournament?.name ?? "Tournament TBD"}
+                    </span>
+                    <span className="pool-card-name">{pool.name}</span>
+                    {pool.description && (
+                      <span className="pool-card-meta" style={{ display: "block", marginTop: 2, fontSize: "0.8rem", color: "var(--muted)", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {pool.description}
+                      </span>
+                    )}
+                    <div className="pool-card-meta">
+                      <span>{pool.memberUserIds.length} {pool.memberUserIds.length === 1 ? "member" : "members"}</span>
+                    </div>
+                  </div>
+                  <div className="pool-card-right">
+                    <span className={`status-pill ${statusClass}`}>{statusLabel}</span>
+                    <button
+                      type="button"
+                      className="primary-button small-button"
+                      disabled={joiningPublicPoolId === pool.id}
+                      onClick={() => void handleJoinPublicPool(pool.joinCode, pool.id)}
+                    >
+                      {joiningPublicPoolId === pool.id ? "Joining…" : "Join"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* ── Footer ────────────────────────────────────────────────────────── */}
       <footer className="dashboard-footer">
-        <span>© 2026 GolfPool · v1.8.0</span>
+        <span>© 2026 GolfPool · v1.9.0</span>
         <div className="dashboard-footer-links">
           <button className="footer-link-button" onClick={logout} type="button">
             Log out

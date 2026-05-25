@@ -9,6 +9,7 @@ import {
   Golfer,
   Pool,
   PoolEntry,
+  PoolMessage,
   TeamSelection,
   Tier,
   Tournament,
@@ -25,6 +26,8 @@ type CreatePoolInput = {
   tournamentId: string;
   lockAt: string;
   tiers: Tier[];
+  isPublic: boolean;
+  description: string;
 };
 
 type AppContextValue = {
@@ -39,6 +42,10 @@ type AppContextValue = {
   updatePoolTiers: (poolId: string, tiers: Tier[]) => Promise<void>;
   submitTiers: (poolId: string) => Promise<void>;
   inviteEmails: (poolId: string, emails: string[]) => Promise<void>;
+  updatePoolDescription: (poolId: string, description: string) => Promise<void>;
+  updatePoolVisibility: (poolId: string, isPublic: boolean) => Promise<void>;
+  sendChatMessage: (poolId: string, message: string) => Promise<PoolMessage | null>;
+  fetchChatMessages: (poolId: string) => Promise<PoolMessage[]>;
   saveEntry: (poolId: string, selections: TeamSelection[], submit: boolean) => Promise<PoolEntry | null>;
   importTournamentFeed: (tournament: Tournament, golfers: Golfer[]) => Promise<void>;
   refreshGolfers: (tournamentId: string) => Promise<void>;
@@ -85,6 +92,8 @@ type JoinedPoolRow = {
   created_at: string;
   lock_at: string;
   tiers: Tier[] | null;
+  is_public: boolean;
+  description: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -174,7 +183,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .select(
           "id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete",
         ),
-      supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers,tiers_submitted_at"),
+      supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers,tiers_submitted_at,is_public,description"),
       supabase.from("pool_members").select("pool_id,user_id"),
       supabase.from("pool_entries").select("id,pool_id,user_id,selections,submitted_at"),
     ]);
@@ -203,6 +212,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         lockAt: pool.lock_at,
         tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
         tiersSubmittedAt: (pool as { tiers_submitted_at?: string | null }).tiers_submitted_at ?? null,
+        isPublic: (pool as { is_public?: boolean }).is_public ?? false,
+        description: (pool as { description?: string | null }).description ?? null,
       })) ?? [];
 
     const entries: PoolEntry[] =
@@ -366,6 +377,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             invited_emails: [],
             lock_at: input.lockAt,
             tiers: input.tiers,
+            is_public: input.isPublic,
+            description: input.description.trim() || null,
           })
           .select("id,join_code,created_at")
           .single();
@@ -388,6 +401,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           lockAt: input.lockAt,
           tiers: input.tiers,
           tiersSubmittedAt: null,
+          isPublic: input.isPublic,
+          description: input.description.trim() || null,
         };
       },
 
@@ -416,6 +431,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           lockAt: pool.lock_at,
           tiers: Array.isArray(pool.tiers) ? (pool.tiers as Tier[]) : [],
           tiersSubmittedAt: null,
+          isPublic: pool.is_public ?? false,
+          description: pool.description ?? null,
         };
       },
 
@@ -442,6 +459,53 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const merged = Array.from(new Set([...pool.invitedEmails, ...emails.map((e) => e.toLowerCase())]));
         await supabase.from("pools").update({ invited_emails: merged }).eq("id", poolId);
         await loadState();
+      },
+
+      async updatePoolDescription(poolId, description) {
+        const supabase = await getSupabaseBrowserClient();
+        await supabase.from("pools").update({ description: description.trim() || null }).eq("id", poolId);
+        await loadState();
+      },
+
+      async updatePoolVisibility(poolId, isPublic) {
+        const supabase = await getSupabaseBrowserClient();
+        await supabase.from("pools").update({ is_public: isPublic }).eq("id", poolId);
+        await loadState();
+      },
+
+      async sendChatMessage(poolId, message) {
+        if (!currentUser) return null;
+        const supabase = await getSupabaseBrowserClient();
+        const { data, error } = await supabase
+          .from("pool_messages")
+          .insert({ pool_id: poolId, user_id: currentUser.id, message: message.trim() })
+          .select("id,pool_id,user_id,message,created_at")
+          .single();
+        if (error || !data) return null;
+        return {
+          id: data.id,
+          poolId: data.pool_id,
+          userId: data.user_id,
+          message: data.message,
+          createdAt: data.created_at,
+        };
+      },
+
+      async fetchChatMessages(poolId) {
+        const supabase = await getSupabaseBrowserClient();
+        const { data } = await supabase
+          .from("pool_messages")
+          .select("id,pool_id,user_id,message,created_at")
+          .eq("pool_id", poolId)
+          .order("created_at", { ascending: true })
+          .limit(200);
+        return (data ?? []).map((row) => ({
+          id: row.id,
+          poolId: row.pool_id,
+          userId: row.user_id,
+          message: row.message,
+          createdAt: row.created_at,
+        }));
       },
 
       // -- Entries ------------------------------------------------------------

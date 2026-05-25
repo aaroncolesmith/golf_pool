@@ -66,6 +66,8 @@ export function CreatePoolWizard() {
   const router = useRouter();
   const { state, currentUser, createPool, importTournamentFeed } = useAppState();
   const [poolName, setPoolName] = useState("");
+  const [poolDescription, setPoolDescription] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
   const [poolMessage, setPoolMessage] = useState<string | null>(null);
   const [importOptions, setImportOptions] = useState<UpcomingTournamentOption[]>([]);
   const [selectedImportSlug, setSelectedImportSlug] = useState("");
@@ -154,6 +156,8 @@ export function CreatePoolWizard() {
         tournamentId: tournament.id,
         lockAt: tournament.startDate,
         tiers,
+        isPublic,
+        description: poolDescription,
       });
 
       if (!pool) throw new Error("Unable to create pool.");
@@ -239,6 +243,45 @@ export function CreatePoolWizard() {
                   ))}
                 </select>
               </label>
+
+              <label className="field">
+                <span>Description <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span></span>
+                <textarea
+                  value={poolDescription}
+                  onChange={(e) => setPoolDescription(e.target.value)}
+                  placeholder="Add rules, buy-in info, or any notes for your pool members..."
+                  rows={3}
+                  disabled={isCreating}
+                  style={{ resize: "vertical", minHeight: 72 }}
+                />
+              </label>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontSize: "0.875rem", fontWeight: 600 }}>Visibility</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className={isPublic ? "secondary-button small-button" : "primary-button small-button"}
+                    onClick={() => setIsPublic(false)}
+                    disabled={isCreating}
+                  >
+                    Private
+                  </button>
+                  <button
+                    type="button"
+                    className={isPublic ? "primary-button small-button" : "secondary-button small-button"}
+                    onClick={() => setIsPublic(true)}
+                    disabled={isCreating}
+                  >
+                    Public
+                  </button>
+                </div>
+                <p className="muted small" style={{ margin: 0 }}>
+                  {isPublic
+                    ? "Anyone on GolfPool can discover and join this pool."
+                    : "Only people with the join code or link can join."}
+                </p>
+              </div>
 
               <button
                 className="primary-button"

@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppState } from "@/lib/store";
 import { cn } from "@/lib/utils";
+
+type PoolPreview = {
+  id: string;
+  name: string;
+  description: string | null;
+  isPublic: boolean;
+  memberCount: number;
+};
 
 type AuthNotice = {
   ok: boolean;
@@ -17,6 +25,8 @@ export function JoinPoolPage({ code }: { code: string }) {
   const { currentUser, joinPool, register, login, isReady } = useAppState();
   const [joinMessage, setJoinMessage] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
+  const [poolPreview, setPoolPreview] = useState<PoolPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
 
   // Auth form state for unauthenticated users
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
@@ -24,6 +34,16 @@ export function JoinPoolPage({ code }: { code: string }) {
   const [isPendingAuth, setIsPendingAuth] = useState(false);
 
   const displayCode = code.toUpperCase();
+
+  useEffect(() => {
+    fetch(`/api/pools/preview?code=${encodeURIComponent(displayCode)}`)
+      .then((r) => r.json())
+      .then((data: { ok: boolean; pool?: PoolPreview }) => {
+        if (data.ok && data.pool) setPoolPreview(data.pool);
+      })
+      .catch(() => null)
+      .finally(() => setPreviewLoading(false));
+  }, [displayCode]);
 
   async function handleJoin() {
     setJoinMessage(null);
@@ -92,7 +112,7 @@ export function JoinPoolPage({ code }: { code: string }) {
           <p className="eyebrow" style={{ marginBottom: 8 }}>GolfPool invite</p>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <h1 style={{ fontSize: "1.5rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
-              Join with code
+              {previewLoading ? "Loading pool…" : (poolPreview?.name ?? "Join with code")}
             </h1>
             <span className="join-code-display">{displayCode}</span>
           </div>
@@ -100,6 +120,35 @@ export function JoinPoolPage({ code }: { code: string }) {
             Someone invited you to their golf pool.
           </p>
         </div>
+
+        {/* Description banner — shown prominently if present */}
+        {poolPreview?.description && (
+          <div
+            style={{
+              margin: "0 0 4px",
+              padding: "14px 18px",
+              background: "var(--primary-soft)",
+              borderRadius: 12,
+              border: "1px solid rgba(28,110,231,0.15)",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "0.72rem",
+                fontWeight: 800,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--primary)",
+                marginBottom: 6,
+              }}
+            >
+              Pool Info
+            </p>
+            <p style={{ fontSize: "0.92rem", lineHeight: 1.55, margin: 0, whiteSpace: "pre-wrap" }}>
+              {poolPreview.description}
+            </p>
+          </div>
+        )}
 
         <div className="join-card-body">
           {currentUser ? (

@@ -8,7 +8,7 @@ import { isPoolLocked, poolSharePath, validateSelections } from "@/lib/pool";
 import { buildLeaderboard } from "@/lib/scoring";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAppState } from "@/lib/store";
-import { Golfer, Pool, PoolEntry, TeamSelection, Tier, Tournament } from "@/lib/types";
+import { Golfer, Pool, PoolEntry, PoolMessage, TeamSelection, Tier, Tournament } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 /** Auto-refresh interval while tournament is in progress (5 minutes) */
@@ -34,7 +34,7 @@ function formatLastSynced(isoString: string | null): string {
   return `Updated ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-type TabId = "picks" | "tiers" | "leaderboard" | "analytics" | "members" | "admin";
+type TabId = "picks" | "tiers" | "leaderboard" | "analytics" | "members" | "chat" | "admin";
 
 // ---------------------------------------------------------------------------
 // Tab: My Picks
@@ -923,6 +923,204 @@ function TiersTab({
 }
 
 // ---------------------------------------------------------------------------
+// Tab: Chat
+// ---------------------------------------------------------------------------
+
+function ChatTab({
+  poolId,
+  currentUser,
+  users,
+}: {
+  poolId: string;
+  currentUser: { id: string; userName: string } | null;
+  users: { id: string; userName: string }[];
+}) {
+  const { sendChatMessage, fetchChatMessages } = useAppState();
+  const [messages, setMessages] = useState<PoolMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    void fetchChatMessages(poolId).then(setMessages);
+
+    let cleanup: (() => void) | null = null;
+    void getSupabaseBrowserClient().then((supabase) => {
+      const channel = supabase
+        .channel(`chat-${poolId}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "pool_messages", filter: `pool_id=eq.${poolId}` },
+          (payload) => {
+            const row = payload.new as {
+              id: string; pool_id: string; user_id: string; message: string; created_at: string;
+            };
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === row.id)) return prev;
+              return [...prev, { id: row.id, poolId: row.pool_id, userId: row.user_id, message: row.message, createdAt: row.created_at }];
+            });
+          },
+        )
+        .subscribe();
+      cleanup = () => { void supabase.removeChannel(channel); };
+    });
+
+    return () => cleanup?.();
+  }, [poolId, fetchChatMessages]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  async function handleSend() {
+    const text = draft.trim();
+    if (!text || isSending) return;
+    setIsSending(true);
+    setDraft("");
+    await sendChatMessage(poolId, text);
+    setIsSending(false);
+  }
+
+  function formatTime(iso: string) {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+
+  function formatDay(iso: string) {
+    const d = new Date(iso);
+    const today = new Date();
+    if (d.toDateString() === today.toDateString()) return "Today";
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+
+  // Group messages by day
+  type MessageGroup = { day: string; items: PoolMessage[] };
+  const groups = messages.reduce<MessageGroup[]>((acc, msg) => {
+    const day = formatDay(msg.createdAt);
+    const last = acc.at(-1);
+    if (last?.day === day) { last.items.push(msg); return acc; }
+    return [...acc, { day, items: [msg] }];
+  }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "min(520px, 70vh)", gap: 0 }}>
+      {/* Message list */}
+      <div
+        style={{
+          flex: 1, overflowY: "auto", display: "flex", flexDirection: "column",
+          gap: 2, padding: "12px 0",
+        }}
+      >
+        {messages.length === 0 && (
+          <div className="empty-state" style={{ flex: 1, justifyContent: "center" }}>
+            <span className="empty-state-icon">💬</span>
+            <p style={{ fontWeight: 700 }}>No messages yet</p>
+            <p className="muted small">Start the conversation below.</p>
+          </div>
+        )}
+        {groups.map((group) => (
+          <div key={group.day}>
+            <div style={{ textAlign: "center", margin: "8px 0 6px" }}>
+              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                {group.day}
+              </span>
+            </div>
+            {group.items.map((msg) => {
+              const isMe = msg.userId === currentUser?.id;
+              const sender = users.find((u) => u.id === msg.userId);
+              const name = sender?.userName ?? "Unknown";
+              return (
+                <div
+                  key={msg.id}
+                  style={{
+                    display: "flex",
+                    flexDirection: isMe ? "row-reverse" : "row",
+                    alignItems: "flex-end",
+                    gap: 8,
+                    padding: "2px 12px",
+                  }}
+                >
+                  {!isMe && (
+                    <span
+                      style={{
+                        width: 28, height: 28, borderRadius: "50%", background: "var(--primary-soft)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "0.75rem", fontWeight: 800, color: "var(--primary)", flexShrink: 0,
+                      }}
+                    >
+                      {name.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <div style={{ maxWidth: "72%", display: "flex", flexDirection: "column", gap: 2, alignItems: isMe ? "flex-end" : "flex-start" }}>
+                    {!isMe && (
+                      <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--muted)", paddingLeft: 4 }}>
+                        {name}
+                      </span>
+                    )}
+                    <div
+                      style={{
+                        background: isMe ? "var(--primary)" : "var(--surface-raised, #f0f2f5)",
+                        color: isMe ? "#fff" : "var(--text)",
+                        borderRadius: isMe ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                        padding: "8px 12px",
+                        fontSize: "0.9rem",
+                        lineHeight: 1.45,
+                        wordBreak: "break-word",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {msg.message}
+                    </div>
+                    <span style={{ fontSize: "0.68rem", color: "var(--muted)", paddingLeft: 4, paddingRight: 4 }}>
+                      {formatTime(msg.createdAt)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      {currentUser ? (
+        <div
+          style={{
+            display: "flex", gap: 8, padding: "10px 0 0",
+            borderTop: "1px solid var(--line)",
+          }}
+        >
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
+            placeholder="Message the pool…"
+            disabled={isSending}
+            style={{ flex: 1 }}
+          />
+          <button
+            type="button"
+            className="primary-button small-button"
+            onClick={() => void handleSend()}
+            disabled={isSending || !draft.trim()}
+          >
+            Send
+          </button>
+        </div>
+      ) : (
+        <p className="muted small" style={{ textAlign: "center", paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+          Sign in to chat.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tab: Admin controls
 // ---------------------------------------------------------------------------
 
@@ -943,10 +1141,14 @@ function AdminTab({
   scoresLastSyncedAt: string | null;
   onScoresSynced: (ts: string) => void;
 }) {
-  const { refreshGolfers } = useAppState();
+  const { refreshGolfers, updatePoolDescription, updatePoolVisibility } = useAppState();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [historicalDate, setHistoricalDate] = useState("");
+  const [descDraft, setDescDraft] = useState(currentPool.description ?? "");
+  const [isSavingDesc, setIsSavingDesc] = useState(false);
+  const [descMessage, setDescMessage] = useState<string | null>(null);
+  const [isTogglingVisibility, setIsTogglingVisibility] = useState(false);
 
   async function handleSyncScores(date?: string) {
     setIsSyncing(true);
@@ -984,8 +1186,85 @@ function AdminTab({
     }
   }
 
+  async function handleSaveDescription() {
+    setIsSavingDesc(true);
+    setDescMessage(null);
+    try {
+      await updatePoolDescription(currentPool.id, descDraft);
+      setDescMessage("Description saved.");
+    } catch {
+      setDescMessage("Failed to save description.");
+    } finally {
+      setIsSavingDesc(false);
+    }
+  }
+
+  async function handleToggleVisibility() {
+    setIsTogglingVisibility(true);
+    try {
+      await updatePoolVisibility(currentPool.id, !currentPool.isPublic);
+    } finally {
+      setIsTogglingVisibility(false);
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Pool description */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <p style={{ fontSize: "0.75rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)" }}>
+          Pool Description
+        </p>
+        <p className="muted small" style={{ margin: 0 }}>
+          Visible to all members and shown prominently on the join page.
+        </p>
+        <textarea
+          value={descDraft}
+          onChange={(e) => { setDescDraft(e.target.value); setDescMessage(null); }}
+          placeholder="Add rules, buy-in requirements, or any other info for members..."
+          rows={4}
+          style={{ resize: "vertical", minHeight: 80, fontSize: "0.88rem" }}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            className="primary-button small-button"
+            onClick={() => void handleSaveDescription()}
+            disabled={isSavingDesc}
+          >
+            {isSavingDesc ? "Saving…" : "Save Description"}
+          </button>
+          {descMessage && <span className="muted small">{descMessage}</span>}
+        </div>
+      </div>
+
+      {/* Visibility */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <p style={{ fontSize: "0.75rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)" }}>
+          Visibility
+        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", background: "var(--surface-raised, #f7f8fa)", borderRadius: 10, border: "1px solid var(--line)" }}>
+          <div>
+            <p style={{ fontWeight: 700, fontSize: "0.9rem", margin: 0 }}>
+              {currentPool.isPublic ? "Public" : "Private"}
+            </p>
+            <p className="muted small" style={{ margin: 0 }}>
+              {currentPool.isPublic
+                ? "Anyone on GolfPool can discover and join this pool."
+                : "Only people with the join code or link can join."}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="secondary-button small-button"
+            onClick={() => void handleToggleVisibility()}
+            disabled={isTogglingVisibility}
+          >
+            {isTogglingVisibility ? "Saving…" : currentPool.isPublic ? "Make Private" : "Make Public"}
+          </button>
+        </div>
+      </div>
+
       {/* Score sync */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <p
@@ -1532,6 +1811,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
       ? [{ id: "analytics" as TabId, label: "Analytics" }]
       : []),
     { id: "members", label: "Members", badge: memberUsers.length || undefined },
+    { id: "chat", label: "Chat" },
     ...(isAdmin ? [{ id: "admin" as TabId, label: "⚙ Admin" }] : []),
   ];
 
@@ -1585,6 +1865,11 @@ export function PoolPage({ poolId }: { poolId: string }) {
             <p className="pool-page-sub">
               {currentTournament.course} · {statusLabel}
             </p>
+            {currentPool.description && (
+              <p style={{ marginTop: 6, fontSize: "0.85rem", color: "var(--muted)", lineHeight: 1.45, maxWidth: 520 }}>
+                {currentPool.description}
+              </p>
+            )}
           </div>
           {isLocked && (
             <span className="status-pill live" style={{ flexShrink: 0 }}>
@@ -1670,6 +1955,14 @@ export function PoolPage({ poolId }: { poolId: string }) {
             entries={state.entries}
             isAdmin={isAdmin}
             isLocked={isLocked}
+          />
+        )}
+
+        {activeTab === "chat" && (
+          <ChatTab
+            poolId={currentPool.id}
+            currentUser={currentUser}
+            users={state.users}
           />
         )}
 
