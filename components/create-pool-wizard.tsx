@@ -190,18 +190,6 @@ export function CreatePoolWizard() {
 
   return (
     <main className="dashboard-shell">
-      <section className="dashboard-nav">
-        <div className="brand-lockup">
-          <strong>GolfPool</strong>
-          <span style={{ fontSize: "0.65rem", fontWeight: 500, color: "var(--muted)", letterSpacing: "0.03em", marginLeft: 5 }}>v0.39</span>
-        </div>
-        <div className="dashboard-actions">
-          <span className="profile-badge" aria-label={currentUser.userName}>
-            {currentUser.userName.slice(0, 1).toUpperCase()}
-          </span>
-        </div>
-      </section>
-
       <article className="panel create-panel create-page-panel">
         <div className="create-layout step-one-layout">
           <div className="create-main create-main-card">
