@@ -1843,7 +1843,8 @@ export function PoolPage({ poolId }: { poolId: string }) {
     ...(isAdmin ? [{ id: "admin" as TabId, label: "⚙ Admin" }] : []),
   ];
 
-  const statusLabel = isLocked ? "In progress" : `Locks ${formatDate(currentPool.lockAt)}`;
+  const isFinished = currentTournament.status === "finished";
+  const statusLabel = isFinished ? "Final" : isLocked ? "In progress" : `Locks ${formatDate(currentPool.lockAt)}`;
 
   return (
     <main className="pool-page-shell">
@@ -1891,7 +1892,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
             <p className="eyebrow">{currentTournament.name}</p>
             <h1 className="pool-page-title">{currentPool.name}</h1>
             <p className="pool-page-sub">
-              {currentTournament.course} · {statusLabel}
+              {currentTournament.course && currentTournament.course !== "TBD" ? `${currentTournament.course} · ` : ""}{statusLabel}
             </p>
             {currentPool.description && (
               <p style={{ marginTop: 6, fontSize: "0.85rem", color: "var(--muted)", lineHeight: 1.45, maxWidth: 520 }}>
@@ -1899,7 +1900,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
               </p>
             )}
           </div>
-          {isLocked && (
+          {isLocked && !isFinished && (
             <span className="status-pill live" style={{ flexShrink: 0 }}>
               Live
             </span>

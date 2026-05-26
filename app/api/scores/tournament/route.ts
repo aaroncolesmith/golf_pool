@@ -346,8 +346,11 @@ export async function GET(request: Request) {
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
 
-    const lsCount = c.linescores?.length ?? 0;
-    const inferredCut = !explicitCutLike && currentPeriod >= 3 && lsCount < 3;
+    const validLsCount = (c.linescores ?? []).filter((ls) => {
+      const v = typeof ls.value === "number" ? ls.value : parseFloat(String(ls.value ?? ""));
+      return !isNaN(v) && v > 0;
+    }).length;
+    const inferredCut = !explicitCutLike && currentPeriod >= 3 && validLsCount < currentPeriod;
 
     const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;

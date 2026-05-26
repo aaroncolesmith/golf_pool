@@ -190,10 +190,14 @@ export async function POST(request: Request) {
     }
   }
 
-  // Persist event ID and sync timestamp
+  // Auto-detect finished: if every player who made the cut has 4 complete rounds,
+  // the tournament is done. Otherwise keep/set it as in_progress.
+  const allActiveFinished = espnResult.golfers.every((g) => !g.madeCut || g.roundsComplete >= 4);
+  const newStatus = allActiveFinished ? "finished" : "in_progress";
+
   await supabase
     .from("tournaments")
-    .update({ scores_updated_at: espnResult.fetchedAt, espn_event_id: espnResult.eventId })
+    .update({ scores_updated_at: espnResult.fetchedAt, espn_event_id: espnResult.eventId, status: newStatus })
     .eq("id", tournamentId);
 
   return NextResponse.json({

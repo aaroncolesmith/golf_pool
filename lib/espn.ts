@@ -255,11 +255,17 @@ function parseCompetitors(
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
 
-    const lsCount = c.linescores?.length ?? 0;
+    // Count only linescores with a positive stroke value — ESPN fills all 4
+    // slots for every player (including cut players) using 0 for unplayed rounds,
+    // so the raw array length is always 4 and useless for cut detection.
+    const validLsCount = (c.linescores ?? []).filter((ls) => {
+      const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
+      return typeof v === "number" && !isNaN(v) && v > 0;
+    }).length;
     const inferredCut =
       !explicitCutLike &&
       effectivePeriod >= 3 &&
-      lsCount < 3;
+      validLsCount < effectivePeriod;
 
     const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;
