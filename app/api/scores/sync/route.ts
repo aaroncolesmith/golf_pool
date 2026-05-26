@@ -5,19 +5,17 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 /**
  * POST /api/scores/sync
  *
- * Body: { tournamentId: string; date?: string }
+ * Body: { tournamentId: string; date?: string; espnEventId?: string }
  *
- * Fetches live scores from ESPN for the given tournament, matches golfers by
- * name, and writes score updates to Supabase.
+ * Fetches scores from ESPN for the given tournament and writes them to Supabase.
  *
- * Pass `date` as "YYYYMMDD" to fetch from ESPN's dated scoreboard — useful for
- * re-syncing a finished tournament after it has left the current scoreboard.
+ * When neither date nor espnEventId are provided (auto mode), the server tries:
+ *   1. Previously stored espn_event_id on the tournament row
+ *   2. Current ESPN scoreboard (works while tournament is live)
+ *   3. Dated scoreboard for computed final-round dates (start_date +3, +2, +4, +1)
  *
- * Authentication required — any pool member can trigger a sync.
- *
- * Response:
- *   { ok: true, eventName: string, updated: number, unmatched: string[] }
- *   { ok: false, error: string }
+ * When espnEventId is provided, it is saved to the tournament row immediately so
+ * future auto-syncs use it without any manual input.
  */
 export async function POST(request: Request) {
   let body: { tournamentId?: string; date?: string; espnEventId?: string };
@@ -32,57 +30,63 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "tournamentId is required." }, { status: 400 });
   }
 
-  // Verify the requesting user is authenticated
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ ok: false, error: "Authentication required." }, { status: 401 });
   }
 
-  // Load the tournament — get start_date and espn_event_id for smart sync
+  // Use select("*") to avoid errors if optional columns (espn_event_id) don't exist yet.
   const { data: tournament, error: tError } = await supabase
     .from("tournaments")
-    .select("id, name, status, start_date, espn_event_id")
+    .select("*")
     .eq("id", tournamentId)
     .single();
 
-  if (tError || !tournament) {
+  if (tError) {
+    console.error("[sync] Tournament query error:", tError.message);
+    return NextResponse.json(
+      { ok: false, error: `Failed to load tournament: ${tError.message}` },
+      { status: 500 },
+    );
+  }
+  if (!tournament) {
     return NextResponse.json({ ok: false, error: "Tournament not found." }, { status: 404 });
   }
 
   const tName = tournament.name as string;
+  const startDateStr = (tournament.start_date as string | null) ?? null;
+  const storedEventId = (tournament.espn_event_id as string | null) ?? null;
 
-  // Build a prioritized list of fetch strategies and try them in order until one works.
-  // This means admins never need to manually find dates or event IDs.
+  // If the caller supplied an ESPN event ID, save it to the tournament row immediately
+  // so future auto-syncs can use it without any manual input.
+  if (espnEventId && espnEventId !== storedEventId) {
+    await supabase
+      .from("tournaments")
+      .update({ espn_event_id: espnEventId })
+      .eq("id", tournamentId);
+  }
+
+  // Build a prioritized strategy list — try each in order until one works.
   type Strategy = () => Promise<Awaited<ReturnType<typeof fetchEspnScores>>>;
   const strategies: Strategy[] = [];
 
   if (espnEventId) {
-    // Explicit event ID always wins when provided
     strategies.push(() => fetchEspnScoresByEventId(espnEventId, tName));
   } else if (date) {
-    // Explicit date provided
     strategies.push(() => fetchEspnScoresByDate(tName, date));
   } else {
-    // Auto mode: try every available signal in order of reliability
-    const storedEventId = tournament.espn_event_id as string | null;
-    if (storedEventId) {
-      strategies.push(() => fetchEspnScoresByEventId(storedEventId, tName));
+    // Auto mode
+    const effectiveEventId = espnEventId ?? storedEventId;
+    if (effectiveEventId) {
+      strategies.push(() => fetchEspnScoresByEventId(effectiveEventId, tName));
     }
-
-    // Try current scoreboard (works for live/upcoming)
+    // Current scoreboard (live/upcoming)
     strategies.push(() => fetchEspnScores(tName));
-
-    // For finished/locked tournaments, also try dates around the final round.
-    // PGA Tour events run Thu–Sun, so final round ≈ start_date + 3 days.
-    // We try +3 (Sun), +2 (Sat), +4 (Mon makeup), +1 (Fri) as fallbacks.
-    const startDateStr = tournament.start_date as string | null;
+    // Dated scoreboard: PGA Tour runs Thu–Sun so final round ≈ start + 3 days.
     if (startDateStr) {
       const startDate = new Date(startDateStr);
-      for (const offset of [3, 2, 4, 1]) {
+      for (const offset of [3, 2, 4, 1, 0]) {
         const candidate = new Date(startDate);
         candidate.setUTCDate(candidate.getUTCDate() + offset);
         const yyyymmdd = candidate.toISOString().slice(0, 10).replace(/-/g, "");
@@ -98,22 +102,23 @@ export async function POST(request: Request) {
   }
 
   if (!espnResult) {
+    const hint = startDateStr
+      ? ` Try "Advanced sync options" and enter the specific date or ESPN event ID.`
+      : "";
     return NextResponse.json(
       {
         ok: false,
         error: espnEventId
-          ? `Unable to fetch scores for ESPN event ID "${espnEventId}". Double-check the ID from the ESPN leaderboard URL.`
+          ? `ESPN returned no data for event ID "${espnEventId}". Verify the ID is correct.`
           : date
-            ? `No ESPN data found for date ${date}. Try a different date when the tournament was active.`
-            : "Unable to find this tournament on ESPN. It may not have started yet, or ESPN's data is temporarily unavailable.",
+            ? `No ESPN data found for ${date}. Try a different date.`
+            : `Could not find this tournament on ESPN.${hint}`,
       },
       { status: 502 },
     );
   }
 
-  // Load our golfers — include all NOT NULL columns so the upsert payload is
-  // complete (PostgREST evaluates NOT NULL constraints on the INSERT branch of
-  // ON CONFLICT before detecting the key conflict on some versions).
+  // Load our golfers
   const { data: ourGolfers, error: gError } = await supabase
     .from("golfers")
     .select("id, name, tournament_id, odds_american, implied_probability")
@@ -124,57 +129,35 @@ export async function POST(request: Request) {
   }
 
   type OurGolfer = {
-    id: string;
-    name: string;
-    tournament_id: string;
-    odds_american: number;
-    implied_probability: number;
+    id: string; name: string; tournament_id: string;
+    odds_american: number; implied_probability: number;
   };
 
-  // Build a normalized-name → golfer map
   const golferByNorm = new Map<string, OurGolfer>();
   for (const g of ourGolfers as OurGolfer[]) {
     golferByNorm.set(normalizeGolferName(g.name), g);
   }
 
   const updates: Array<{
-    id: string;
-    tournament_id: string;
-    name: string;
-    odds_american: number;
-    implied_probability: number;
-    current_score_to_par: number;
-    position: string;
-    made_cut: boolean;
-    rounds_complete: number;
-    r1_score: number | null;
-    r2_score: number | null;
-    r3_score: number | null;
-    r4_score: number | null;
+    id: string; tournament_id: string; name: string;
+    odds_american: number; implied_probability: number;
+    current_score_to_par: number; position: string;
+    made_cut: boolean; rounds_complete: number;
+    r1_score: number | null; r2_score: number | null;
+    r3_score: number | null; r4_score: number | null;
   }> = [];
-
   const unmatched: string[] = [];
 
   for (const espnGolfer of espnResult.golfers) {
     const normalized = normalizeGolferName(espnGolfer.displayName);
     let ourGolfer = golferByNorm.get(normalized);
-
-    // Fallback: last-name-only match
     if (!ourGolfer) {
       const lastName = normalized.split(" ").at(-1) ?? "";
       for (const [key, g] of golferByNorm) {
-        if (key.endsWith(` ${lastName}`) || key === lastName) {
-          ourGolfer = g;
-          break;
-        }
+        if (key.endsWith(` ${lastName}`) || key === lastName) { ourGolfer = g; break; }
       }
     }
-
-    if (!ourGolfer) {
-      unmatched.push(espnGolfer.displayName);
-      continue;
-    }
-
+    if (!ourGolfer) { unmatched.push(espnGolfer.displayName); continue; }
     updates.push({
       id: ourGolfer.id,
       tournament_id: ourGolfer.tournament_id,
@@ -192,25 +175,22 @@ export async function POST(request: Request) {
     });
   }
 
-  // Deduplicate by id — ESPN occasionally lists the same golfer twice
-  const dedupedUpdates = Array.from(
-    new Map(updates.map((u) => [u.id, u])).values(),
-  );
+  const dedupedUpdates = Array.from(new Map(updates.map((u) => [u.id, u])).values());
 
-  // Write score updates to Supabase in a single upsert
   if (dedupedUpdates.length > 0) {
-    const { error: upsertError } = await supabase.from("golfers").upsert(dedupedUpdates, { onConflict: "id" });
-
+    const { error: upsertError } = await supabase
+      .from("golfers")
+      .upsert(dedupedUpdates, { onConflict: "id" });
     if (upsertError) {
       console.error("[sync] Upsert error:", upsertError);
       return NextResponse.json(
-        { ok: false, error: `Failed to write score updates: ${upsertError.message}` },
+        { ok: false, error: `Failed to write scores: ${upsertError.message}` },
         { status: 500 },
       );
     }
   }
 
-  // Stamp scores_updated_at and persist the ESPN event ID for future lookups
+  // Persist event ID and sync timestamp
   await supabase
     .from("tournaments")
     .update({ scores_updated_at: espnResult.fetchedAt, espn_event_id: espnResult.eventId })

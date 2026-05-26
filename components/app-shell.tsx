@@ -428,7 +428,7 @@ function Dashboard() {
 
       {/* ── Footer ────────────────────────────────────────────────────────── */}
       <footer className="dashboard-footer">
-        <span>© 2026 GolfPool · v1.9.0</span>
+        <span>© 2026 GolfPool · v1.9.1</span>
         <div className="dashboard-footer-links">
           <button className="footer-link-button" onClick={logout} type="button">
             Log out
