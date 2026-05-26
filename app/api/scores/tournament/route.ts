@@ -286,7 +286,20 @@ export async function GET(request: Request) {
   const competition = event.competitions?.[0];
   const competitors = competition?.competitors ?? [];
   const competitionStatus = competition?.status;
-  const currentPeriod = competitionStatus?.period ?? 1;
+  const reportedPeriod = competitionStatus?.period ?? 1;
+
+  // Derive effective period from max rounds played — ESPN may return period=0
+  // for finished tournaments fetched by event ID, breaking cut detection.
+  const maxRoundsPlayed = Math.max(
+    0,
+    ...competitors.map((c) =>
+      (c.linescores ?? []).filter((ls) => {
+        const v = typeof ls.value === "number" ? ls.value : parseFloat(String(ls.value ?? ""));
+        return !isNaN(v) && v > 0;
+      }).length,
+    ),
+  );
+  const currentPeriod = Math.max(reportedPeriod, maxRoundsPlayed);
 
   // Derive course par per round dynamically to avoid the par-70/72 assumption
   let coursePar = 72;

@@ -228,6 +228,20 @@ function parseCompetitors(
   competitors: EspnCompetitor[],
   competitionPeriod: number,
 ): GolferScoreUpdate[] {
+  // Derive the effective round from the most rounds any player has completed.
+  // ESPN may return period=0 for finished tournaments fetched by event ID, so
+  // relying solely on competitionPeriod causes cut detection to silently fail.
+  const maxRoundsPlayed = Math.max(
+    0,
+    ...competitors.map((c) =>
+      (c.linescores ?? []).filter((ls) => {
+        const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
+        return typeof v === "number" && !isNaN(v) && v > 0;
+      }).length,
+    ),
+  );
+  const effectivePeriod = Math.max(competitionPeriod, maxRoundsPlayed);
+
   const rawGolfers: GolferScoreUpdate[] = competitors.map((c) => {
     const statusName = c.status?.type?.name ?? "";
     const scoreValue = c.score ?? "";
@@ -244,7 +258,7 @@ function parseCompetitors(
     const lsCount = c.linescores?.length ?? 0;
     const inferredCut =
       !explicitCutLike &&
-      competitionPeriod >= 3 &&
+      effectivePeriod >= 3 &&
       lsCount < 3;
 
     const isCutLike = explicitCutLike || inferredCut;
