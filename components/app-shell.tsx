@@ -6,7 +6,7 @@ import { useState } from "react";
 import { buildLeaderboard } from "@/lib/scoring";
 import { useAppState } from "@/lib/store";
 import { LeaderboardRow } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { APP_VERSION, cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -428,7 +428,7 @@ function Dashboard() {
 
       {/* ── Footer ────────────────────────────────────────────────────────── */}
       <footer className="dashboard-footer">
-        <span>© 2026 GolfPool · v1.9.1</span>
+        <span>© 2026 GolfPool · {APP_VERSION}</span>
         <div className="dashboard-footer-links">
           <button className="footer-link-button" onClick={logout} type="button">
             Log out
