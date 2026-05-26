@@ -1151,6 +1151,7 @@ function AdminTab({
   const [isSavingDesc, setIsSavingDesc] = useState(false);
   const [descMessage, setDescMessage] = useState<string | null>(null);
   const [isTogglingVisibility, setIsTogglingVisibility] = useState(false);
+  const [isMarkingStatus, setIsMarkingStatus] = useState(false);
 
   async function handleSyncScores(date?: string, eventId?: string) {
     setIsSyncing(true);
@@ -1186,6 +1187,27 @@ function AdminTab({
       setSyncMessage("Sync failed — check your connection and try again.");
     } finally {
       setIsSyncing(false);
+    }
+  }
+
+  async function handleMarkStatus(status: "finished" | "in_progress") {
+    setIsMarkingStatus(true);
+    try {
+      const res = await fetch(`/api/tournaments/${tournamentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = (await res.json()) as { ok: boolean; error?: string };
+      if (data.ok) {
+        window.location.reload();
+      } else {
+        setSyncMessage(`Failed: ${data.error ?? "Unknown error"}`);
+      }
+    } catch {
+      setSyncMessage("Failed to update tournament status.");
+    } finally {
+      setIsMarkingStatus(false);
     }
   }
 
@@ -1288,11 +1310,27 @@ function AdminTab({
           )}
         </div>
 
-        {tournamentStatus === "finished" && (
-          <p className="muted small" style={{ margin: 0 }}>
-            Automatically finds final scores from ESPN using the tournament dates.
-          </p>
-        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {tournamentStatus !== "finished" ? (
+            <button
+              className="secondary-button small-button"
+              type="button"
+              onClick={() => void handleMarkStatus("finished")}
+              disabled={isMarkingStatus}
+            >
+              {isMarkingStatus ? "Updating…" : "Mark as Finished"}
+            </button>
+          ) : (
+            <button
+              className="secondary-button small-button"
+              type="button"
+              onClick={() => void handleMarkStatus("in_progress")}
+              disabled={isMarkingStatus}
+            >
+              {isMarkingStatus ? "Updating…" : "Reopen Tournament"}
+            </button>
+          )}
+        </div>
 
         {syncMessage && (
           <p className={syncMessage.startsWith("Sync failed") ? "muted small" : "muted small"} style={{ margin: 0, color: syncMessage.startsWith("Sync failed") ? "var(--danger)" : "inherit" }}>

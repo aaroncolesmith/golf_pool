@@ -16,6 +16,71 @@ import { createClient } from "@supabase/supabase-js";
  *   { ok: true }
  *   { ok: false, error: string }
  */
+/**
+ * PATCH /api/tournaments/[id]
+ *
+ * Updates mutable fields on a tournament. Currently supports: { status }.
+ * The requesting user must be admin of a pool tied to this tournament.
+ */
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  if (!id) {
+    return NextResponse.json({ ok: false, error: "Tournament ID is required." }, { status: 400 });
+  }
+
+  let body: { status?: string };
+  try {
+    body = (await request.json()) as { status?: string };
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid request body." }, { status: 400 });
+  }
+
+  const VALID_STATUSES = new Set(["upcoming", "in_progress", "finished"]);
+  if (body.status !== undefined && !VALID_STATUSES.has(body.status)) {
+    return NextResponse.json({ ok: false, error: "Invalid status value." }, { status: 400 });
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "Authentication required." }, { status: 401 });
+  }
+
+  const { data: adminPool, error: poolError } = await supabase
+    .from("pools")
+    .select("id")
+    .eq("tournament_id", id)
+    .eq("admin_user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (poolError || !adminPool) {
+    return NextResponse.json({ ok: false, error: "Not authorized to update this tournament." }, { status: 403 });
+  }
+
+  const adminClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  );
+
+  const updates: Record<string, string> = {};
+  if (body.status) updates.status = body.status;
+
+  const { error: updateError } = await adminClient
+    .from("tournaments")
+    .update(updates)
+    .eq("id", id);
+
+  if (updateError) {
+    return NextResponse.json({ ok: false, error: `Failed to update tournament: ${updateError.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
