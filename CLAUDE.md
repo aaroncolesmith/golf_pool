@@ -1,0 +1,3 @@
+-When finished with a task, commit changes directly to the main branch."
+-Never create pull requests; use git push origin main instead.
+-When pushing a new version, update the version in the app so that the user knows they are on the latest

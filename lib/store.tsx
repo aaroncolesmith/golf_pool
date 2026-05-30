@@ -34,6 +34,8 @@ type AppContextValue = {
   state: AppState;
   currentUser: User | null;
   isReady: boolean;
+  hasSession: boolean;
+  isDataLoading: boolean;
   register: (userName: string, email: string) => Promise<AuthResult>;
   login: (email: string) => Promise<AuthResult>;
   logout: () => Promise<void>;
@@ -152,17 +154,25 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [isReady, setIsReady] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(true);
   const hasLoadedOnce = useRef(false);
 
   // -------------------------------------------------------------------------
   // Core data loader — fetches everything the current user can see
   // -------------------------------------------------------------------------
   const loadState = useCallback(async () => {
-    // Only show the loading screen on the very first load.
-    // Subsequent reloads (e.g. after sign-in) update state silently.
-    if (!hasLoadedOnce.current) setIsReady(false);
-
     const supabase = await getSupabaseBrowserClient();
+
+    // ── Phase 1: instant session check (localStorage, no network) ──────────
+    // getSession() reads from localStorage and resolves in ~1ms — no network
+    // call. This lets us immediately show the right page (auth or dashboard)
+    // without any visible loading screen.
+    const { data: { session } } = await supabase.auth.getSession();
+    setState(prev => ({ ...prev, currentUserId: session?.user?.id ?? null }));
+    setIsReady(true);
+
+    // ── Phase 2: full data load (network calls) ──────────────────────────────
+    setIsDataLoading(true);
 
     const [
       { data: authData },
@@ -246,6 +256,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     hasLoadedOnce.current = true;
     setIsReady(true);
+    setIsDataLoading(false);
   }, []);
 
   // -------------------------------------------------------------------------
@@ -277,11 +288,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // -------------------------------------------------------------------------
   const value = useMemo<AppContextValue>(() => {
     const currentUser = state.users.find((u) => u.id === state.currentUserId) ?? null;
+    const hasSession = state.currentUserId !== null;
 
     return {
       state,
       currentUser,
       isReady,
+      hasSession,
+      isDataLoading,
 
       // -- Auth ---------------------------------------------------------------
       async register(userName, email) {
@@ -338,6 +352,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await supabase.auth.signOut();
         setState(EMPTY_STATE);
         setIsReady(true);
+        setIsDataLoading(false);
       },
 
       // -- Pools --------------------------------------------------------------
@@ -654,7 +669,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }));
       },
     };
-  }, [state, isReady, loadState]);
+  }, [state, isReady, isDataLoading, loadState]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

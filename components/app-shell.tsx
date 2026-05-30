@@ -181,12 +181,38 @@ function AuthPage() {
 
 function Dashboard() {
   const router = useRouter();
-  const { state, currentUser, logout, joinPool } = useAppState();
+  const { state, currentUser, logout, joinPool, isDataLoading } = useAppState();
   const [joinCode, setJoinCode] = useState("");
   const [isJoinOpen, setIsJoinOpen] = useState(false);
   const [joinMessage, setJoinMessage] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
   const [joiningPublicPoolId, setJoiningPublicPoolId] = useState<string | null>(null);
+
+  // Data is still loading from Supabase — show skeleton dashboard so there's
+  // no full-page flash. Hooks must be declared above this early return.
+  if (isDataLoading && !currentUser) {
+    return (
+      <main className="dashboard-shell">
+        <section className="home-hero">
+          <div>
+            <p className="eyebrow">Dashboard</p>
+            <div className="skeleton-line" style={{ height: 32, width: 200, borderRadius: 8 }} />
+            <div className="skeleton-line short" style={{ height: 14, width: 260, marginTop: 8 }} />
+          </div>
+        </section>
+        <section className="dashboard-table-panel">
+          <div className="dashboard-section-head">
+            <h2>My Pools</h2>
+          </div>
+          <div className="pool-card-list">
+            <PoolCardSkeleton />
+            <PoolCardSkeleton />
+            <PoolCardSkeleton />
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   if (!currentUser) return null;
 
@@ -445,23 +471,13 @@ function Dashboard() {
 // ---------------------------------------------------------------------------
 
 export function AppShell() {
-  const { currentUser, isReady } = useAppState();
+  const { currentUser, isReady, hasSession } = useAppState();
 
-  if (!isReady) {
-    return (
-      <main className="centered-page">
-        <div className="panel callback-panel">
-          <p className="eyebrow">GolfPool</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
-            <div className="skeleton-line tall medium" />
-            <div className="skeleton-line short" />
-          </div>
-          <p className="muted small" style={{ marginTop: 4 }}>Checking your session…</p>
-        </div>
-      </main>
-    );
-  }
+  // isReady flips true in ~1ms (getSession reads localStorage, no network).
+  // Returning null here is imperceptible — avoids any visible flash.
+  if (!isReady) return null;
 
-  if (!currentUser) return <AuthPage />;
+  // Immediately show the right page based on the local session state.
+  if (!hasSession) return <AuthPage />;
   return <Dashboard />;
 }
