@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { importDraftKingsTournament } from "@/lib/draftkings";
 
-export const revalidate = 1800;
+export const revalidate = 300;
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   try {
