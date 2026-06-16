@@ -220,6 +220,16 @@ function Dashboard() {
     pool.memberUserIds.includes(currentUser.id),
   );
 
+  const activePools = poolsForUser.filter((pool) => {
+    const t = state.tournaments.find((t) => t.id === pool.tournamentId);
+    return t?.status !== "finished";
+  });
+
+  const completedPools = poolsForUser.filter((pool) => {
+    const t = state.tournaments.find((t) => t.id === pool.tournamentId);
+    return t?.status === "finished";
+  });
+
   const discoverablePools = state.pools.filter(
     (pool) => pool.isPublic && !pool.memberUserIds.includes(currentUser.id),
   );
@@ -256,7 +266,9 @@ function Dashboard() {
           <p className="muted">
             {poolsForUser.length === 0
               ? "No pools yet — create one or join with a code."
-              : `${poolsForUser.length} active ${poolsForUser.length === 1 ? "pool" : "pools"} this week.`}
+              : activePools.length === 0
+                ? "No active pools right now."
+                : `${activePools.length} active ${activePools.length === 1 ? "pool" : "pools"} this week.`}
           </p>
         </div>
         {/* Mobile-only action row */}
@@ -301,19 +313,19 @@ function Dashboard() {
         </div>
       )}
 
-      {/* ── Pool list panel ──────────────────────────────────────────────── */}
+      {/* ── Active pools ─────────────────────────────────────────────────── */}
       <section className="dashboard-table-panel">
         <div className="dashboard-section-head">
           <h2>My Pools</h2>
           <span className="panel-kicker">
-            {poolsForUser.length} {poolsForUser.length === 1 ? "entry" : "entries"}
+            {activePools.length} {activePools.length === 1 ? "entry" : "entries"}
           </span>
         </div>
 
-        {poolsForUser.length === 0 ? (
+        {activePools.length === 0 ? (
           <div className="empty-state">
             <span className="empty-state-icon">⛳</span>
-            <p style={{ fontWeight: 700 }}>No pools yet</p>
+            <p style={{ fontWeight: 700 }}>No active pools</p>
             <p className="muted small">
               Create a pool to get started, or join one with an invite code.
             </p>
@@ -332,61 +344,29 @@ function Dashboard() {
           </div>
         ) : (
           <div className="pool-card-list">
-            {poolsForUser.map((pool) => {
-              const tournament = state.tournaments.find(
-                (candidate) => candidate.id === pool.tournamentId,
-              );
+            {activePools.map((pool) => {
+              const tournament = state.tournaments.find((t) => t.id === pool.tournamentId);
               const fullLeaderboard = buildLeaderboard(state, pool);
               const rank = rankLabel(fullLeaderboard, currentUser.id);
-              const myRow =
-                fullLeaderboard.find((row) => row.userId === currentUser.id) ?? null;
-
-              const statusLabel =
-                tournament?.status === "finished"
-                  ? "Done"
-                  : tournament?.status === "in_progress"
-                    ? "Live"
-                    : "Upcoming";
-              const statusClass =
-                tournament?.status === "finished"
-                  ? "completed"
-                  : tournament?.status === "in_progress"
-                    ? "live"
-                    : "pending";
-
-              const myEntry = state.entries.find(
-                (e) => e.poolId === pool.id && e.userId === currentUser.id,
-              );
-              const draftStatus = myEntry?.submittedAt
-                ? "Submitted"
-                : myEntry
-                  ? "Draft saved"
-                  : "Not started";
+              const myRow = fullLeaderboard.find((row) => row.userId === currentUser.id) ?? null;
+              const statusLabel = tournament?.status === "in_progress" ? "Live" : "Upcoming";
+              const statusClass = tournament?.status === "in_progress" ? "live" : "pending";
+              const myEntry = state.entries.find((e) => e.poolId === pool.id && e.userId === currentUser.id);
+              const draftStatus = myEntry?.submittedAt ? "Submitted" : myEntry ? "Draft saved" : "Not started";
 
               return (
                 <Link className="pool-card" href={`/pools/${pool.id}`} key={pool.id}>
                   <div className="pool-card-body">
-                    <span className="pool-card-tournament">
-                      {tournament?.name ?? "Tournament TBD"}
-                    </span>
+                    <span className="pool-card-tournament">{tournament?.name ?? "Tournament TBD"}</span>
                     <span className="pool-card-name">{pool.name}</span>
                     <div className="pool-card-meta">
                       <span>{draftStatus}</span>
-                      {rank && (
-                        <>
-                          <span className="pool-card-meta-sep" />
-                          <span>{rank}</span>
-                        </>
-                      )}
+                      {rank && <><span className="pool-card-meta-sep" /><span>{rank}</span></>}
                     </div>
                   </div>
                   <div className="pool-card-right">
                     <span className={`status-pill ${statusClass}`}>{statusLabel}</span>
-                    {myRow && (
-                      <span className={scoreBadgeClass(myRow.teamScore)}>
-                        {scoreLabel(myRow.teamScore)}
-                      </span>
-                    )}
+                    {myRow && <span className={scoreBadgeClass(myRow.teamScore)}>{scoreLabel(myRow.teamScore)}</span>}
                   </div>
                 </Link>
               );
@@ -394,6 +374,43 @@ function Dashboard() {
           </div>
         )}
       </section>
+
+      {/* ── Completed pools ───────────────────────────────────────────────── */}
+      {completedPools.length > 0 && (
+        <section className="dashboard-table-panel">
+          <div className="dashboard-section-head">
+            <h2>Completed Pools</h2>
+            <span className="panel-kicker">{completedPools.length} finished</span>
+          </div>
+          <div className="pool-card-list">
+            {completedPools.map((pool) => {
+              const tournament = state.tournaments.find((t) => t.id === pool.tournamentId);
+              const fullLeaderboard = buildLeaderboard(state, pool);
+              const rank = rankLabel(fullLeaderboard, currentUser.id);
+              const myRow = fullLeaderboard.find((row) => row.userId === currentUser.id) ?? null;
+              const myEntry = state.entries.find((e) => e.poolId === pool.id && e.userId === currentUser.id);
+              const draftStatus = myEntry?.submittedAt ? "Submitted" : myEntry ? "Draft saved" : "Not started";
+
+              return (
+                <Link className="pool-card" href={`/pools/${pool.id}`} key={pool.id}>
+                  <div className="pool-card-body">
+                    <span className="pool-card-tournament">{tournament?.name ?? "Tournament TBD"}</span>
+                    <span className="pool-card-name">{pool.name}</span>
+                    <div className="pool-card-meta">
+                      <span>{draftStatus}</span>
+                      {rank && <><span className="pool-card-meta-sep" /><span>{rank}</span></>}
+                    </div>
+                  </div>
+                  <div className="pool-card-right">
+                    <span className="status-pill completed">Done</span>
+                    {myRow && <span className={scoreBadgeClass(myRow.teamScore)}>{scoreLabel(myRow.teamScore)}</span>}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* ── Discoverable public pools ─────────────────────────────────────── */}
       {discoverablePools.length > 0 && (
