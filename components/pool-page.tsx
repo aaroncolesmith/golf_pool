@@ -930,19 +930,30 @@ function ChatTab({
   poolId,
   currentUser,
   users,
+  onMessagesLoaded,
+  onNewMessage,
 }: {
   poolId: string;
   currentUser: { id: string; userName: string } | null;
   users: { id: string; userName: string }[];
+  onMessagesLoaded: (messages: PoolMessage[]) => void;
+  onNewMessage: (msg: PoolMessage) => void;
 }) {
   const { sendChatMessage, fetchChatMessages } = useAppState();
   const [messages, setMessages] = useState<PoolMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const onMessagesLoadedRef = useRef(onMessagesLoaded);
+  const onNewMessageRef = useRef(onNewMessage);
+  useEffect(() => { onMessagesLoadedRef.current = onMessagesLoaded; });
+  useEffect(() => { onNewMessageRef.current = onNewMessage; });
 
   useEffect(() => {
-    void fetchChatMessages(poolId).then(setMessages);
+    void fetchChatMessages(poolId).then((msgs) => {
+      setMessages(msgs);
+      onMessagesLoadedRef.current(msgs);
+    });
 
     let cleanup: (() => void) | null = null;
     void getSupabaseBrowserClient().then((supabase) => {
@@ -955,10 +966,12 @@ function ChatTab({
             const row = payload.new as {
               id: string; pool_id: string; user_id: string; message: string; created_at: string;
             };
+            const newMsg: PoolMessage = { id: row.id, poolId: row.pool_id, userId: row.user_id, message: row.message, createdAt: row.created_at };
             setMessages((prev) => {
               if (prev.some((m) => m.id === row.id)) return prev;
-              return [...prev, { id: row.id, poolId: row.pool_id, userId: row.user_id, message: row.message, createdAt: row.created_at }];
+              return [...prev, newMsg];
             });
+            onNewMessageRef.current(newMsg);
           },
         )
         .subscribe();
@@ -1706,6 +1719,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
   const [activeTab, setActiveTab] = useState<TabId>("picks");
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // ESPN live scores stored separately so they can arrive before or after
   // Supabase golfers load without a race condition.
@@ -1788,6 +1802,13 @@ export function PoolPage({ poolId }: { poolId: string }) {
     return () => cleanup?.();
   }, [tournament?.id]);
 
+  // Mark chat as read whenever the chat tab is active
+  useEffect(() => {
+    if (activeTab !== "chat" || !currentUser) return;
+    localStorage.setItem(`chat-read-${poolId}-${currentUser.id}`, new Date().toISOString());
+    setUnreadChatCount(0);
+  }, [activeTab, currentUser, poolId]);
+
   const liveGolfers = useMemo(() => Array.from(golferMap.values()), [golferMap]);
   const liveState = useMemo(
     () => ({ ...state, golfers: liveGolfers }),
@@ -1869,6 +1890,20 @@ export function PoolPage({ poolId }: { poolId: string }) {
     (e) => e.poolId === poolId && e.submittedAt !== null,
   );
 
+  function handleMessagesLoaded(messages: PoolMessage[]) {
+    if (!currentUser || activeTab === "chat") return;
+    const since = localStorage.getItem(`chat-read-${poolId}-${currentUser.id}`);
+    const unread = messages.filter(
+      (m) => m.userId !== currentUser.id && (since === null || m.createdAt > since),
+    ).length;
+    setUnreadChatCount(unread);
+  }
+
+  function handleNewChatMessage(msg: PoolMessage) {
+    if (activeTab === "chat" || msg.userId === currentUser?.id) return;
+    setUnreadChatCount((prev) => prev + 1);
+  }
+
   const tabs: { id: TabId; label: string; badge?: number }[] = [
     { id: "picks", label: "My Picks" },
     { id: "tiers", label: "Tiers" },
@@ -1877,7 +1912,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
       ? [{ id: "analytics" as TabId, label: "Analytics" }]
       : []),
     { id: "members", label: "Members", badge: memberUsers.length || undefined },
-    { id: "chat", label: "Chat" },
+    { id: "chat", label: "Chat", badge: unreadChatCount || undefined },
     ...(isAdmin ? [{ id: "admin" as TabId, label: "⚙ Admin" }] : []),
   ];
 
@@ -2030,6 +2065,8 @@ export function PoolPage({ poolId }: { poolId: string }) {
             poolId={currentPool.id}
             currentUser={currentUser}
             users={state.users}
+            onMessagesLoaded={handleMessagesLoaded}
+            onNewMessage={handleNewChatMessage}
           />
         )}
 
