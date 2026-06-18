@@ -102,4 +102,5 @@ export type LeaderboardRow = {
   benchGolfers: Golfer[];
   teamScore: number | null;
   status: "live" | "locked" | "eliminated";
+  tiebreakerUsed: number | null;
 };

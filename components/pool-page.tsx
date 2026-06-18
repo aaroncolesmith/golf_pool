@@ -274,7 +274,25 @@ function MasterboardCard({
       </colgroup>
       <thead>
         <tr>
-          <th className="mb-col-rank">{isElim ? "—" : rank}</th>
+          <th className="mb-col-rank">
+            {isElim ? "—" : rank}
+            {!isElim && row.tiebreakerUsed !== null && (
+              <span
+                title={`Tie broken by Top ${row.tiebreakerUsed} scores`}
+                style={{
+                  cursor: "help",
+                  fontSize: "0.5rem",
+                  fontWeight: 800,
+                  verticalAlign: "super",
+                  marginLeft: 2,
+                  color: "#b89a2e",
+                  letterSpacing: "0.03em",
+                }}
+              >
+                TB
+              </span>
+            )}
+          </th>
           <th className="mb-col-name">
             {row.teamName}
             {isYou && <span style={{ color: "#b89a2e", marginLeft: 4, fontSize: "0.6rem" }}>★</span>}
@@ -338,14 +356,6 @@ function Masterboard({
     [...lastNameToGolfers.entries()].filter(([, names]) => names.size > 1).map(([last]) => last)
   );
 
-  function rankOf(row: LbRow): string {
-    const myScore = row.teamScore ?? 999;
-    const betterCount = activeRows.filter((r) => (r.teamScore ?? 999) < myScore).length;
-    const rank = betterCount + 1;
-    const tied = activeRows.filter((r) => (r.teamScore ?? 999) === myScore).length > 1;
-    return tied ? `T${rank}` : `${rank}`;
-  }
-
   return (
     <div className="mb-shell">
       <div className="mb-banner">
@@ -354,11 +364,11 @@ function Masterboard({
 
 
       <div className="mb-grid">
-        {activeRows.map((row) => (
+        {activeRows.map((row, index) => (
           <MasterboardCard
             key={row.entryId}
             row={row}
-            rank={rankOf(row)}
+            rank={`${index + 1}`}
             isElim={false}
             currentUserId={currentUserId}
             isLocked={isLocked}
