@@ -192,7 +192,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .from("golfers")
         .select(
           "id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete",
-        ),
+        )
+        .limit(5000),
       supabase.from("pools").select("id,name,tournament_id,admin_user_id,join_code,invited_emails,created_at,lock_at,tiers,tiers_submitted_at,is_public,description"),
       supabase.from("pool_members").select("pool_id,user_id"),
       supabase.from("pool_entries").select("id,pool_id,user_id,selections,submitted_at"),
