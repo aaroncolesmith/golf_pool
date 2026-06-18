@@ -1727,24 +1727,43 @@ export function PoolPage({ poolId }: { poolId: string }) {
   const [espnScores, setEspnScores] = useState<Map<string, EspnScore>>(new Map());
 
   useEffect(() => {
+    if (!tournament?.id) return;
+    const tid = tournament.id;
     function normName(s: string): string {
       return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
     }
-    const storeGolfers = state.golfers.filter((g) => g.tournamentId === tournament?.id);
-    const merged = new Map(storeGolfers.map((g): [string, Golfer] => {
-      const normed = normName(g.name);
-      let espn = espnScores.get(normed);
-      if (!espn) {
-        const last = normed.split(" ").at(-1) ?? "";
-        for (const [key, val] of espnScores) {
-          if (key.endsWith(` ${last}`) || key === last) { espn = val; break; }
+    void getSupabaseBrowserClient().then(async (supabase) => {
+      const { data } = await supabase
+        .from("golfers")
+        .select("id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete")
+        .eq("tournament_id", tid);
+      if (!data) return;
+      const merged = new Map(data.map((row): [string, Golfer] => {
+        const g: Golfer = {
+          id: row.id,
+          tournamentId: row.tournament_id,
+          name: row.name,
+          oddsAmerican: row.odds_american,
+          impliedProbability: row.implied_probability,
+          currentScoreToPar: row.current_score_to_par,
+          position: row.position,
+          madeCut: row.made_cut,
+          roundsComplete: row.rounds_complete,
+        };
+        const normed = normName(g.name);
+        let espn = espnScores.get(normed);
+        if (!espn) {
+          const last = normed.split(" ").at(-1) ?? "";
+          for (const [key, val] of espnScores) {
+            if (key.endsWith(` ${last}`) || key === last) { espn = val; break; }
+          }
         }
-      }
-      if (!espn) return [g.id, g];
-      return [g.id, { ...g, currentScoreToPar: espn.score, position: espn.position, madeCut: espn.madeCut }];
-    }));
-    setGolferMap(merged);
-  }, [state.golfers, tournament?.id, espnScores]);
+        if (!espn) return [g.id, g];
+        return [g.id, { ...g, currentScoreToPar: espn.score, position: espn.position, madeCut: espn.madeCut }];
+      }));
+      setGolferMap(merged);
+    });
+  }, [tournament?.id, espnScores]);
 
   // Supabase Realtime — live score updates
   useEffect(() => {
