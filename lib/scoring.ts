@@ -101,7 +101,13 @@ function createLeaderboardRow(state: AppState, entry: PoolEntry): LeaderboardRow
 
   const ordered = [...madeCutGolfers].sort((a, b) => a.currentScoreToPar - b.currentScoreToPar);
   const countingGolfers = ordered.slice(0, 4);
-  const benchGolfers = golfers.filter((g) => !countingGolfers.some((c) => c.id === g.id));
+  const benchGolfers = golfers
+    .filter((g) => !countingGolfers.some((c) => c.id === g.id))
+    .sort((a, b) => {
+      if (a.madeCut && !b.madeCut) return -1;
+      if (!a.madeCut && b.madeCut) return 1;
+      return a.currentScoreToPar - b.currentScoreToPar;
+    });
   const teamScore = countingGolfers.reduce((sum, g) => sum + g.currentScoreToPar, 0);
 
   return {
