@@ -37,22 +37,40 @@ export function buildLeaderboard(state: AppState, pool: Pool): LeaderboardRow[] 
     return a.teamName.localeCompare(b.teamName);
   });
 
-  // Annotate each row with the first tiebreaker level that distinguishes it
-  // from any other row sharing the same top-4 score.
-  for (const row of rows) {
-    if (row.teamScore === null) continue;
-    const rivals = rows.filter((r) => r.entryId !== row.entryId && r.teamScore === row.teamScore);
-    if (rivals.length === 0) continue;
-    const myScores = scoreMap.get(row.entryId) ?? [];
-    for (const n of [3, 2, 1, 5, 6]) {
-      const myTopN = topNScore(myScores, n);
-      const differsFromAny = rivals.some(
-        (r) => topNScore(scoreMap.get(r.entryId) ?? [], n) !== myTopN,
-      );
-      if (differsFromAny) {
-        row.tiebreakerUsed = n;
+  // Annotate tiebreaker info by comparing each consecutive adjacent pair.
+  // Using adjacent pairs (not "any rival") ensures we report the level that
+  // actually separated the two teams immediately next to each other in the ranking.
+  // For rows involved in multiple pairs, keep the MOST SPECIFIC level (deepest in
+  // TIEBREAK_ORDER), since that reflects the hardest comparison needed for that row.
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = rows[i];
+    const b = rows[i + 1];
+    if (a.teamScore === null || b.teamScore === null || a.teamScore !== b.teamScore) continue;
+
+    const aScores = scoreMap.get(a.entryId) ?? [];
+    const bScores = scoreMap.get(b.entryId) ?? [];
+
+    let pairLevel: number | null = null;
+    for (let ti = 1; ti < TIEBREAK_ORDER.length; ti++) {
+      const n = TIEBREAK_ORDER[ti];
+      if (topNScore(aScores, n) !== topNScore(bScores, n)) {
+        pairLevel = n;
         break;
       }
+    }
+
+    if (pairLevel !== null) {
+      // Score tiebreaker resolved this pair. Keep the deepest (most specific) level
+      // seen across all adjacent pairs for each row.
+      const levelIdx = TIEBREAK_ORDER.indexOf(pairLevel);
+      const aIdx = a.tiebreakerUsed !== null ? TIEBREAK_ORDER.indexOf(a.tiebreakerUsed) : -1;
+      const bIdx = b.tiebreakerUsed !== null ? TIEBREAK_ORDER.indexOf(b.tiebreakerUsed) : -1;
+      if (levelIdx > aIdx) a.tiebreakerUsed = pairLevel;
+      if (levelIdx > bIdx) b.tiebreakerUsed = pairLevel;
+    } else {
+      // No score tiebreaker can separate this pair — mark both as truly tied.
+      a.trulyTied = true;
+      b.trulyTied = true;
     }
   }
 
@@ -77,6 +95,7 @@ function createLeaderboardRow(state: AppState, entry: PoolEntry): LeaderboardRow
       teamScore: null,
       status: "eliminated",
       tiebreakerUsed: null,
+      trulyTied: false,
     };
   }
 
@@ -94,5 +113,6 @@ function createLeaderboardRow(state: AppState, entry: PoolEntry): LeaderboardRow
     teamScore,
     status: "live",
     tiebreakerUsed: null,
+    trulyTied: false,
   };
 }

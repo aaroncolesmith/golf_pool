@@ -103,4 +103,5 @@ export type LeaderboardRow = {
   teamScore: number | null;
   status: "live" | "locked" | "eliminated";
   tiebreakerUsed: number | null;
+  trulyTied: boolean;
 };

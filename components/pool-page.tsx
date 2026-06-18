@@ -276,7 +276,7 @@ function MasterboardCard({
         <tr>
           <th className="mb-col-rank">
             {isElim ? "—" : rank}
-            {!isElim && row.tiebreakerUsed !== null && (
+            {!isElim && row.tiebreakerUsed !== null && !row.trulyTied && (
               <span
                 title={`Tie broken by Top ${row.tiebreakerUsed} scores`}
                 style={{
@@ -364,18 +364,33 @@ function Masterboard({
 
 
       <div className="mb-grid">
-        {activeRows.map((row, index) => (
-          <MasterboardCard
-            key={row.entryId}
-            row={row}
-            rank={`${index + 1}`}
-            isElim={false}
-            currentUserId={currentUserId}
-            isLocked={isLocked}
-            thruMap={thruMap}
-            dupLastNames={dupLastNames}
-          />
-        ))}
+        {activeRows.map((row, index) => {
+          let rank: string;
+          if (row.trulyTied) {
+            // Walk back to find the start of this truly-tied group
+            let groupStart = index;
+            while (
+              groupStart > 0 &&
+              activeRows[groupStart - 1].trulyTied &&
+              activeRows[groupStart - 1].teamScore === row.teamScore
+            ) groupStart--;
+            rank = `T${groupStart + 1}`;
+          } else {
+            rank = `${index + 1}`;
+          }
+          return (
+            <MasterboardCard
+              key={row.entryId}
+              row={row}
+              rank={rank}
+              isElim={false}
+              currentUserId={currentUserId}
+              isLocked={isLocked}
+              thruMap={thruMap}
+              dupLastNames={dupLastNames}
+            />
+          );
+        })}
       </div>
 
       {eliminatedRows.length > 0 && (
