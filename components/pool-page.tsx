@@ -1716,7 +1716,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
   // Local golfer map — starts from store, patched live via Supabase Realtime
   const [golferMap, setGolferMap] = useState<Map<string, Golfer>>(new Map());
   const [localSyncedAt, setLocalSyncedAt] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("picks");
+  const [activeTab, setActiveTab] = useState<TabId>("leaderboard");
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -1924,9 +1924,9 @@ export function PoolPage({ poolId }: { poolId: string }) {
   }
 
   const tabs: { id: TabId; label: string; badge?: number }[] = [
+    { id: "leaderboard", label: "Leaderboard", badge: leaderboard.length || undefined },
     { id: "picks", label: "My Picks" },
     { id: "tiers", label: "Tiers" },
-    { id: "leaderboard", label: "Leaderboard", badge: leaderboard.length || undefined },
     ...(isLocked && submittedEntries.length > 0
       ? [{ id: "analytics" as TabId, label: "Analytics" }]
       : []),
