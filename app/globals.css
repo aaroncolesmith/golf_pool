@@ -1245,7 +1245,7 @@ button:disabled {
 .mb-card--elim { opacity: 0.75; filter: grayscale(0.3); }
 
 /* Fixed column widths */
-.mb-col-rank  { width: 36px; }
+.mb-col-rank  { width: 52px; }
 .mb-col-score { width: 52px; }
 .mb-col-thru  { width: 40px; text-align: right; font-size: 0.65rem; color: var(--muted); padding-right: 6px; }
 /* mb-col-name fills the remaining space */
