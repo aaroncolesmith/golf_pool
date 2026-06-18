@@ -1708,7 +1708,7 @@ function TournamentLeaderboard({
 // ---------------------------------------------------------------------------
 
 export function PoolPage({ poolId }: { poolId: string }) {
-  const { state, currentUser, isReady } = useAppState();
+  const { state, currentUser, isReady, isDataLoading } = useAppState();
 
   const pool = state.pools.find((p) => p.id === poolId);
   const tournament = state.tournaments.find((t) => t.id === pool?.tournamentId);
@@ -1838,7 +1838,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
   // Guards
   // ---------------------------------------------------------------------------
 
-  if (!isReady) {
+  if (!isReady || (isDataLoading && (!pool || !tournament))) {
     return (
       <main className="centered-page">
         <div className="panel callback-panel">
