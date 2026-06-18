@@ -1738,8 +1738,8 @@ export function PoolPage({ poolId }: { poolId: string }) {
   const pool = state.pools.find((p) => p.id === poolId);
   const tournament = state.tournaments.find((t) => t.id === pool?.tournamentId);
 
-  // Local golfer map — starts from store, patched live via Supabase Realtime
-  const [golferMap, setGolferMap] = useState<Map<string, Golfer>>(new Map());
+  // Raw DB golfer map — populated on initial load and updated via Supabase Realtime
+  const [dbGolferMap, setDbGolferMap] = useState<Map<string, Golfer>>(new Map());
   const [localSyncedAt, setLocalSyncedAt] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("leaderboard");
   const [showShareModal, setShowShareModal] = useState(false);
@@ -1751,44 +1751,56 @@ export function PoolPage({ poolId }: { poolId: string }) {
   type EspnScore = { score: number; position: string; madeCut: boolean };
   const [espnScores, setEspnScores] = useState<Map<string, EspnScore>>(new Map());
 
-  useEffect(() => {
-    if (!tournament?.id) return;
-    const tid = tournament.id;
+  // Derived golfer map: merge raw DB data with ESPN overrides.
+  // Using useMemo means Realtime DB updates never silently overwrite ESPN scores \u2014
+  // both sources are always merged fresh whenever either changes.
+  const golferMap = useMemo(() => {
     function normName(s: string): string {
       return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z\s'-]/g, "").replace(/\s+/g, " ").trim();
     }
+    const merged = new Map<string, Golfer>();
+    for (const [id, g] of dbGolferMap) {
+      const normed = normName(g.name);
+      let espn = espnScores.get(normed);
+      if (!espn) {
+        const last = normed.split(" ").at(-1) ?? "";
+        for (const [key, val] of espnScores) {
+          if (key.endsWith(` ${last}`) || key === last) { espn = val; break; }
+        }
+      }
+      if (!espn) {
+        merged.set(id, g);
+      } else {
+        merged.set(id, { ...g, currentScoreToPar: espn.score, position: espn.position, madeCut: espn.madeCut });
+      }
+    }
+    return merged;
+  }, [dbGolferMap, espnScores]);
+
+  // Initial DB fetch \u2014 only re-runs when the tournament changes, not on every ESPN update
+  useEffect(() => {
+    if (!tournament?.id) return;
+    const tid = tournament.id;
     void getSupabaseBrowserClient().then(async (supabase) => {
       const { data } = await supabase
         .from("golfers")
         .select("id,tournament_id,name,odds_american,implied_probability,current_score_to_par,position,made_cut,rounds_complete")
         .eq("tournament_id", tid);
       if (!data) return;
-      const merged = new Map(data.map((row): [string, Golfer] => {
-        const g: Golfer = {
-          id: row.id,
-          tournamentId: row.tournament_id,
-          name: row.name,
-          oddsAmerican: row.odds_american,
-          impliedProbability: row.implied_probability,
-          currentScoreToPar: row.current_score_to_par,
-          position: row.position,
-          madeCut: row.made_cut,
-          roundsComplete: row.rounds_complete,
-        };
-        const normed = normName(g.name);
-        let espn = espnScores.get(normed);
-        if (!espn) {
-          const last = normed.split(" ").at(-1) ?? "";
-          for (const [key, val] of espnScores) {
-            if (key.endsWith(` ${last}`) || key === last) { espn = val; break; }
-          }
-        }
-        if (!espn) return [g.id, g];
-        return [g.id, { ...g, currentScoreToPar: espn.score, position: espn.position, madeCut: espn.madeCut }];
-      }));
-      setGolferMap(merged);
+      const raw = new Map(data.map((row): [string, Golfer] => [row.id, {
+        id: row.id,
+        tournamentId: row.tournament_id,
+        name: row.name,
+        oddsAmerican: row.odds_american,
+        impliedProbability: row.implied_probability,
+        currentScoreToPar: row.current_score_to_par,
+        position: row.position,
+        madeCut: row.made_cut,
+        roundsComplete: row.rounds_complete,
+      }]));
+      setDbGolferMap(raw);
     });
-  }, [tournament?.id, espnScores]);
+  }, [tournament?.id]);
 
   // Supabase Realtime — live score updates
   useEffect(() => {
@@ -1819,7 +1831,7 @@ export function PoolPage({ poolId }: { poolId: string }) {
               made_cut: boolean;
               rounds_complete: number;
             };
-            setGolferMap((prev) => {
+            setDbGolferMap((prev) => {
               const next = new Map(prev);
               next.set(updated.id, {
                 id: updated.id,
