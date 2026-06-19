@@ -278,55 +278,24 @@ function MasterboardCard({
           <th className="mb-col-rank">
             {isElim ? "—" : rank}
             {!isElim && row.tiebreakerUsed !== null && !row.trulyTied && (
-              <span style={{ position: "relative", display: "inline-block" }}>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setShowTbTooltip((v) => !v); }}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    cursor: "pointer",
-                    fontSize: "0.75rem",
-                    fontWeight: 900,
-                    verticalAlign: "super",
-                    marginLeft: 2,
-                    color: "#b89a2e",
-                    lineHeight: 1,
-                  }}
-                >
-                  *
-                </button>
-                {showTbTooltip && (
-                  <>
-                    <div
-                      style={{ position: "fixed", inset: 0, zIndex: 99 }}
-                      onClick={() => setShowTbTooltip(false)}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "calc(100% + 4px)",
-                        left: "50%",
-                        transform: "translateX(-50%)",
-                        zIndex: 100,
-                        background: "#1a2535",
-                        color: "#e8dfc8",
-                        fontSize: "0.65rem",
-                        fontWeight: 600,
-                        padding: "4px 10px",
-                        borderRadius: 6,
-                        border: "1px solid #b89a2e",
-                        whiteSpace: "nowrap",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.45)",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      Tiebreaker: top {row.tiebreakerUsed} scores
-                    </div>
-                  </>
-                )}
-              </span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShowTbTooltip((v) => !v); }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  fontSize: "0.75rem",
+                  fontWeight: 900,
+                  verticalAlign: "super",
+                  marginLeft: 2,
+                  color: "#b89a2e",
+                  lineHeight: 1,
+                }}
+              >
+                *
+              </button>
             )}
           </th>
           <th className="mb-col-name">
@@ -358,6 +327,34 @@ function MasterboardCard({
         )}
       </tbody>
     </table>
+    {showTbTooltip && !isElim && row.tiebreakerUsed !== null && !row.trulyTied && (
+      <>
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 99 }}
+          onClick={() => setShowTbTooltip(false)}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: 38,
+            left: 8,
+            zIndex: 100,
+            background: "#1a2535",
+            color: "#e8dfc8",
+            fontSize: "0.65rem",
+            fontWeight: 600,
+            padding: "5px 10px",
+            borderRadius: 6,
+            border: "1px solid #b89a2e",
+            whiteSpace: "nowrap",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+            pointerEvents: "none",
+          }}
+        >
+          Tiebreaker: top {row.tiebreakerUsed} scores
+        </div>
+      </>
+    )}
     </div>
   );
 }
