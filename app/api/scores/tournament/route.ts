@@ -313,10 +313,20 @@ export async function GET(request: Request) {
       const currentRoundLS = c.linescores[currentPeriod - 1];
       const holesStarted = currentRoundLS?.linescores?.length ?? 0;
       const currentRoundVal = parseRoundScore(currentRoundLS?.value);
-      if (holesStarted > 0 || (currentRoundVal && currentRoundVal > 0)) continue;
+
+      // Skip golfers who are currently mid-round — partial hole data skews the sample.
+      // Golfers who haven't started (holesStarted=0, no value) or who fully finished
+      // (holesStarted>=18, or holesStarted=0 with a positive round total from ESPN)
+      // are both valid for inferring course par.
+      const isMidRound = holesStarted > 0 && holesStarted < 18;
+      if (isMidRound) continue;
+
+      const currentRoundDone =
+        holesStarted >= 18 || (holesStarted === 0 && currentRoundVal !== null && currentRoundVal > 0);
+      const rounds = currentRoundDone ? currentPeriod : currentPeriod - 1;
+
       let totalStrokes = 0;
       let valid = true;
-      const rounds = currentPeriod - 1;
       for (let r = 0; r < rounds; r++) {
         const val = parseRoundScore(c.linescores[r]?.value);
         if (!val || val <= 0) { valid = false; break; }
