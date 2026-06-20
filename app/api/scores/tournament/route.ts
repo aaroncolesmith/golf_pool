@@ -356,13 +356,10 @@ export async function GET(request: Request) {
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
 
-    const validLsCount = (c.linescores ?? []).filter((ls) => {
-      const v = typeof ls.value === "number" ? ls.value : parseFloat(String(ls.value ?? ""));
-      return !isNaN(v) && v > 0;
-    }).length;
-    const inferredCut = !explicitCutLike && currentPeriod >= 3 && validLsCount < currentPeriod;
-
-    const isCutLike = explicitCutLike || inferredCut;
+    // Trust ESPN's explicit cut/wd/dq status. Do NOT infer cut from linescore count —
+    // at the start of a new round most players have no score for that round yet,
+    // which would wrongly mark the entire field as cut.
+    const isCutLike = explicitCutLike;
     const madeCut = !isCutLike;
     const scoreToParInt = parseScoreToPar(scoreValue);
 
