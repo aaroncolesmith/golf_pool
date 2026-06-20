@@ -242,22 +242,29 @@ function parseCompetitors(
   );
   const effectivePeriod = Math.max(competitionPeriod, maxRoundsPlayed);
 
-  // Pre-scan: compute the cut line from players ESPN explicitly marks STATUS_CUT
-  // with a numeric score. The minimum score among known-cut players IS the cut line;
-  // any other player at or above it also missed the cut. This is always safe —
-  // if the cut is at +4, a player at +5 cannot be active regardless of linescore count.
-  // We only activate this when effectivePeriod >= 3 (cut has happened).
-  let inferredCutLine: number | null = null;
+  // Pre-scan: compute the cut stroke line from players ESPN explicitly marks cut.
+  // Use R1+R2 stroke totals (not score-to-par) because many cut players have
+  // score="CUT" (not numeric). Any non-explicit player whose R1+R2 total is >=
+  // the minimum of known-cut players' totals also missed the cut.
+  // Safe at R3 start: strokeCutLine stays null until ESPN marks ≥1 player as cut.
+  let strokeCutLine: number | null = null;
   if (effectivePeriod >= 3) {
-    const cutScores: number[] = [];
+    const strokeCutScores: number[] = [];
     for (const c of competitors) {
       const sn = c.status?.type?.name ?? "";
       const st = (c.score ?? "").trim().toUpperCase();
-      if (sn === "STATUS_CUT" && !["CUT", "WD", "DQ", "MDF"].includes(st)) {
-        cutScores.push(parseScoreToPar(c.score ?? ""));
+      if (sn !== "STATUS_CUT" && st !== "CUT") continue;
+      let total = 0;
+      let ok = true;
+      for (let r = 0; r < 2; r++) {
+        const ls = c.linescores?.[r];
+        const v = typeof ls?.value === "string" ? parseFloat(ls.value) : (ls?.value ?? NaN);
+        if (typeof v !== "number" || isNaN(v) || v <= 0) { ok = false; break; }
+        total += v;
       }
+      if (ok) strokeCutScores.push(total);
     }
-    if (cutScores.length > 0) inferredCutLine = Math.min(...cutScores);
+    if (strokeCutScores.length > 0) strokeCutLine = Math.min(...strokeCutScores);
   }
 
   const rawGolfers: GolferScoreUpdate[] = competitors.map((c) => {
@@ -273,20 +280,29 @@ function parseCompetitors(
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
 
-    // Infer cut when ESPN hasn't set STATUS_CUT but the player's score is at or
-    // above the cut line and they have no current-round data. At the start of a
-    // new round ALL players have no current-round data, but inferredCutLine is null
-    // until at least one player is officially marked cut, so this stays silent then.
+    // Infer cut via stroke total: if R1+R2 strokes >= the stroke cut line and the
+    // player has no current-round data, they missed the cut but ESPN didn't say so.
     const validLsCount = (c.linescores ?? []).filter((ls) => {
       const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
       return typeof v === "number" && !isNaN(v) && v > 0;
     }).length;
+    let playerStrokesThru2: number | null = null;
+    {
+      const ls0 = c.linescores?.[0];
+      const ls1 = c.linescores?.[1];
+      const v0 = typeof ls0?.value === "string" ? parseFloat(ls0.value) : (ls0?.value ?? NaN);
+      const v1 = typeof ls1?.value === "string" ? parseFloat(ls1.value) : (ls1?.value ?? NaN);
+      if (typeof v0 === "number" && !isNaN(v0) && v0 > 0 && typeof v1 === "number" && !isNaN(v1) && v1 > 0) {
+        playerStrokesThru2 = v0 + v1;
+      }
+    }
     const inferredCut =
       !explicitCutLike &&
       effectivePeriod >= 3 &&
       validLsCount < effectivePeriod &&
-      inferredCutLine !== null &&
-      parseScoreToPar(scoreValue) >= inferredCutLine;
+      strokeCutLine !== null &&
+      playerStrokesThru2 !== null &&
+      playerStrokesThru2 >= strokeCutLine;
 
     const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;
