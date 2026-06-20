@@ -248,26 +248,16 @@ function parseCompetitors(
     const scoreTrimmed = scoreValue.trim().toUpperCase();
 
     // --- Cut detection ---
-    const explicitCutLike =
+    // Trust ESPN's explicit status only. Do NOT infer cut from linescore count —
+    // at the start of R3/R4 players who haven't teed off yet have no score for
+    // that round, which would wrongly mark the entire field as cut and corrupt
+    // the DB when the cron job runs.
+    const isCutLike =
       CUT_STATUSES.has(statusName) ||
       scoreTrimmed === "CUT" ||
       scoreTrimmed === "WD" ||
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
-
-    // Count only linescores with a positive stroke value — ESPN fills all 4
-    // slots for every player (including cut players) using 0 for unplayed rounds,
-    // so the raw array length is always 4 and useless for cut detection.
-    const validLsCount = (c.linescores ?? []).filter((ls) => {
-      const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
-      return typeof v === "number" && !isNaN(v) && v > 0;
-    }).length;
-    const inferredCut =
-      !explicitCutLike &&
-      effectivePeriod >= 3 &&
-      validLsCount < effectivePeriod;
-
-    const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;
 
     // --- Rounds complete ---
