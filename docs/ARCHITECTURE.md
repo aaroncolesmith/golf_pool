@@ -73,7 +73,13 @@ The manual sync also lets admins supply a specific ESPN event ID or date to re-s
 
 ESPN returns a `competitions[0].competitors` array. For each competitor:
 
-1. **Cut detection** — check `status.type.name` for `STATUS_CUT`, `STATUS_WD`, `STATUS_DQ`, `STATUS_MDF`, or the `score` field for the string "CUT"/"WD"/"DQ". If any match → `madeCut = false`. **No inference from linescore count** — at the start of a new round most players have no score for that round yet, which would wrongly mark everyone as cut.
+1. **Cut detection** — this is the trickiest part. ESPN's **site API** (`site.api.espn.com`) scoreboard **never sets `STATUS_CUT`** on competitor data during live rounds. Every cut player has `status: null` and a numeric score string (e.g. `"+5"`), indistinguishable from an active player who hasn't teed off yet. Two layers of detection compensate:
+
+   - **Layer 1 — Core API (primary):** After fetching the scoreboard, `lib/espn.ts` makes parallel requests to ESPN's **core API** (`sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/{id}/competitions/{id}/competitors/{id}/status`) for every player who has no current-round data. These endpoints return explicit `STATUS_CUT`, `STATUS_WD`, `STATUS_DQ`, etc. Requests are batched 50 at a time with a 5-second per-request timeout; failures fall through to Layer 2.
+
+   - **Layer 2 — Stroke-limit inference (fallback):** A pre-scan finds the worst (highest) R1+R2 stroke total among players who have **started** the current round (have per-hole linescore data). Any player whose R1+R2 total strictly exceeds that limit and has no current-round data is inferred as having missed the cut. Safe at round start: the limit is `null` until the first player tees off, so no false positives.
+
+   - **Layer 3 — Incomplete-round detection:** If a player's R2 score is missing or zero while the tournament is in period 3+, they withdrew before completing R2 and are also marked as cut. This covers mid-round WDs where ESPN returns a numeric partial score (e.g. `"+7"` after 9 holes of R1) rather than a `"WD"` string.
 
 2. **Round scores** — `linescores[0..3]` map to R1–R4. ESPN fills unplayed slots with `0`, so only values `> 0` are stored; otherwise the column stays `null`.
 
@@ -82,6 +88,12 @@ ESPN returns a `competitions[0].competitors` array. For each competitor:
 4. **Positions** — derived after all competitors are parsed by sorting active players by score and assigning `T3`-style labels. ESPN's own `order` field is not trusted for position because it can be stale.
 
 5. **Name matching** — our golfer names (from the pre-tournament import) are normalized (lowercase, diacritics stripped) and matched against ESPN's `displayName`. Fallback: last-name-only match.
+
+> **ESPN API gotcha:** The two ESPN APIs serve different data:
+> - `site.api.espn.com` — user-friendly scoreboard; no cut status during live rounds
+> - `sports.core.api.espn.com` — granular per-entity data; has explicit cut status
+>
+> The display route (`/api/scores/tournament`) uses Layer 2 + Layer 3 only (no extra HTTP requests) since it runs on every client poll. The cron job uses all three layers.
 
 ---
 
