@@ -16,9 +16,33 @@ export function GlobalNav() {
       </Link>
       <div className="nav-actions">
         {currentUser && (
-          <span className="profile-badge" title={currentUser.userName}>
-            {currentUser.userName.slice(0, 1).toUpperCase()}
-          </span>
+          <>
+            <Link
+              href="/analytics"
+              style={{
+                fontSize: "0.8rem",
+                fontWeight: 600,
+                color: "var(--muted)",
+                textDecoration: "none",
+                padding: "4px 10px",
+                borderRadius: 8,
+                transition: "background 0.15s, color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLAnchorElement).style.background = "var(--primary-soft)";
+                (e.currentTarget as HTMLAnchorElement).style.color = "var(--primary)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLAnchorElement).style.background = "transparent";
+                (e.currentTarget as HTMLAnchorElement).style.color = "var(--muted)";
+              }}
+            >
+              Stats
+            </Link>
+            <span className="profile-badge" title={currentUser.userName}>
+              {currentUser.userName.slice(0, 1).toUpperCase()}
+            </span>
+          </>
         )}
       </div>
     </nav>
