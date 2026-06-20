@@ -29,6 +29,7 @@ type EspnAthlete = {
 type EspnLinescore = {
   period?: { number: number };
   value: number | string;
+  linescores?: EspnLinescore[]; // per-hole data when nested inside a round linescore
 };
 
 type EspnCompetitor = {
@@ -112,6 +113,59 @@ function positionFromStatus(statusName: string): string {
   if (statusName === "STATUS_WD") return "WD";
   if (statusName === "STATUS_DQ") return "DQ";
   return "TBD";
+}
+
+// ---------------------------------------------------------------------------
+// Core API cut status (authoritative source — site API never sets STATUS_CUT
+// in scoreboard competitor data during live rounds)
+// ---------------------------------------------------------------------------
+
+async function fetchCoreApiCutStatuses(
+  eventId: string,
+  competitionId: string,
+  competitors: EspnCompetitor[],
+  effectivePeriod: number,
+): Promise<Map<string, string>> {
+  if (effectivePeriod < 3) return new Map();
+
+  // Only need to check players without current-round data — players who started
+  // the round are definitively active; cut/WD players won't have round data.
+  const toCheck = competitors.filter((c) => {
+    const ls = c.linescores?.[effectivePeriod - 1];
+    const val = typeof ls?.value === "string" ? parseFloat(ls.value) : (ls?.value ?? 0);
+    const holes = ls?.linescores?.length ?? 0;
+    return !((typeof val === "number" && !isNaN(val) && val > 0) || holes > 0);
+  });
+
+  if (toCheck.length === 0) return new Map();
+
+  const map = new Map<string, string>();
+  const BATCH = 50; // parallel at a time to avoid overwhelming ESPN
+
+  for (let i = 0; i < toCheck.length; i += BATCH) {
+    const batch = toCheck.slice(i, i + BATCH);
+    const results = await Promise.allSettled(
+      batch.map(async (c): Promise<{ id: string; statusName: string }> => {
+        try {
+          const url = `https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/${eventId}/competitions/${competitionId}/competitors/${c.id}/status`;
+          const res = await fetch(url, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!res.ok) return { id: c.id, statusName: "" };
+          const data = (await res.json()) as { type?: { name?: string } };
+          return { id: c.id, statusName: data?.type?.name ?? "" };
+        } catch {
+          return { id: c.id, statusName: "" };
+        }
+      }),
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") map.set(r.value.id, r.value.statusName);
+    }
+  }
+
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +281,7 @@ function computePositions(golfers: GolferScoreUpdate[]): GolferScoreUpdate[] {
 function parseCompetitors(
   competitors: EspnCompetitor[],
   competitionPeriod: number,
+  coreStatusMap: Map<string, string> = new Map(),
 ): GolferScoreUpdate[] {
   // Derive the effective round from the most rounds any player has completed.
   // ESPN may return period=0 for finished tournaments fetched by event ID, so
@@ -274,8 +329,12 @@ function parseCompetitors(
     const scoreTrimmed = scoreValue.trim().toUpperCase();
 
     // --- Cut detection ---
+    // Primary: core API status (authoritative — site API never sets STATUS_CUT
+    // in scoreboard data during live rounds)
+    const coreStatus = coreStatusMap.get(c.id) ?? "";
     const explicitCutLike =
       CUT_STATUSES.has(statusName) ||
+      CUT_STATUSES.has(coreStatus) ||
       scoreTrimmed === "CUT" ||
       scoreTrimmed === "WD" ||
       scoreTrimmed === "DQ" ||
@@ -326,8 +385,9 @@ function parseCompetitors(
     // --- Position ---
     let position: string;
     if (!madeCut) {
-      if (statusName) {
-        position = positionFromStatus(statusName);
+      const effectiveStatus = statusName || coreStatus;
+      if (effectiveStatus) {
+        position = positionFromStatus(effectiveStatus);
       } else if (scoreTrimmed === "CUT" || scoreTrimmed === "WD" || scoreTrimmed === "DQ" || scoreTrimmed === "MDF") {
         position = scoreTrimmed;
       } else {
@@ -394,7 +454,26 @@ async function fetchAndParse(url: string, tournamentName: string): Promise<EspnS
   const competitors = competition?.competitors ?? [];
   const competitionPeriod = competition?.status?.period ?? 0;
 
-  const golfers = parseCompetitors(competitors, competitionPeriod);
+  // Compute effectivePeriod here so we can decide whether to hit the core API.
+  // Mirrors the same derivation inside parseCompetitors.
+  const maxRoundsPlayed = Math.max(
+    0,
+    ...competitors.map((c) =>
+      (c.linescores ?? []).filter((ls) => {
+        const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
+        return typeof v === "number" && !isNaN(v) && v > 0;
+      }).length,
+    ),
+  );
+  const effectivePeriod = Math.max(competitionPeriod, maxRoundsPlayed);
+
+  // Fetch explicit cut statuses from ESPN's core API — the site API scoreboard
+  // never sets STATUS_CUT on competitor data during live rounds, so we must
+  // query per-competitor status endpoints for authoritative cut detection.
+  const competitionId = competition?.id ?? event.id;
+  const coreStatusMap = await fetchCoreApiCutStatuses(event.id, competitionId, competitors, effectivePeriod);
+
+  const golfers = parseCompetitors(competitors, competitionPeriod, coreStatusMap);
 
   return {
     eventId: event.id,

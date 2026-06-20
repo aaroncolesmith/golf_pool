@@ -53,7 +53,7 @@ type EspnLinescore = {
 
 type EspnCompetitor = {
   id: string;
-  athlete: { id: string; displayName: string };
+  athlete: { displayName: string };
   score?: string;
   status?: { type: EspnStatusType; period?: number };
   linescores?: EspnLinescore[];
@@ -405,7 +405,15 @@ export async function GET(request: Request) {
       playerStrokesThru2 !== null &&
       playerStrokesThru2 > madeCutStrokeLimit;
 
-    const isCutLike = explicitCutLike || inferredCut;
+    // A player who didn't complete both R1 and R2 by period 3 (mid-round WD,
+    // pre-tournament WD, etc.) also missed the cut. ESPN's site API returns their
+    // score as a numeric string (e.g. "+7") rather than "WD", so explicit checks
+    // above miss them.
+    const completedTwoRounds =
+      playerStrokesThru2 !== null; // non-null means both R1 and R2 had positive values
+    const inferredMissedEarly = !explicitCutLike && currentPeriod >= 3 && !completedTwoRounds;
+
+    const isCutLike = explicitCutLike || inferredCut || inferredMissedEarly;
     const madeCut = !isCutLike;
 
     const roundScores: Record<number, number | null> = {};
