@@ -343,30 +343,29 @@ export async function GET(request: Request) {
     }
   }
 
-  // Pre-scan: compute the cut stroke line from players ESPN explicitly marks cut.
-  // Use R1+R2 stroke totals (not the score-to-par string) because many cut players
-  // have score="CUT" (not a number). Any non-explicit player whose R1+R2 total is
-  // >= the minimum of known-cut players' totals also missed the cut.
-  // Safe at R3 start: strokeCutLine stays null until ESPN marks ≥1 player as cut,
-  // so inference is silent during the window before ESPN processes the cut.
-  let strokeCutLine: number | null = null;
+  // Pre-scan: find the WORST (max) R1+R2 stroke total among players who have
+  // actively started the current round (have per-hole linescore data or a positive
+  // round total). Those players definitively made the cut. Any player with
+  // NO current-round data and R1+R2 total STRICTLY GREATER THAN this limit
+  // missed the cut — even if ESPN hasn't set STATUS_CUT for them yet.
+  // Safe at round start: limit stays null until any player tees off, so
+  // inference is silent and the "everyone is cut" regression cannot happen.
+  let madeCutStrokeLimit: number | null = null;
   if (currentPeriod >= 3) {
-    const strokeCutScores: number[] = [];
+    const r3Totals: number[] = [];
     for (const c of competitors) {
-      const sn = c.status?.type?.name ?? "";
-      const st = (c.score ?? "").trim().toUpperCase();
-      if (sn !== "STATUS_CUT" && st !== "CUT") continue;
-      let total = 0;
-      let ok = true;
-      for (let r = 0; r < 2; r++) {
-        const ls = c.linescores?.[r];
-        const v = ls?.value === undefined ? NaN : (typeof ls.value === "number" ? ls.value : parseFloat(String(ls.value)));
-        if (isNaN(v) || v <= 0) { ok = false; break; }
-        total += v;
-      }
-      if (ok) strokeCutScores.push(total);
+      const ls2 = c.linescores?.[currentPeriod - 1];
+      const r3val = typeof ls2?.value === "number" ? ls2.value : parseFloat(String(ls2?.value ?? ""));
+      const holesInCurrentRound = ls2?.linescores?.length ?? 0;
+      const inCurrentRound = (!isNaN(r3val) && r3val > 0) || holesInCurrentRound > 0;
+      if (!inCurrentRound) continue;
+      const v0raw = c.linescores?.[0]?.value;
+      const v1raw = c.linescores?.[1]?.value;
+      const v0 = typeof v0raw === "number" ? v0raw : parseFloat(String(v0raw ?? ""));
+      const v1 = typeof v1raw === "number" ? v1raw : parseFloat(String(v1raw ?? ""));
+      if (!isNaN(v0) && v0 > 0 && !isNaN(v1) && v1 > 0) r3Totals.push(v0 + v1);
     }
-    if (strokeCutScores.length > 0) strokeCutLine = Math.min(...strokeCutScores);
+    if (r3Totals.length > 0) madeCutStrokeLimit = Math.max(...r3Totals);
   }
 
   // Build golfer list
@@ -384,27 +383,27 @@ export async function GET(request: Request) {
 
     const scoreToParInt = parseScoreToPar(scoreValue);
 
-    // Infer cut via stroke total: if R1+R2 strokes >= the stroke cut line and the
-    // player has no current-round data, they missed the cut but ESPN didn't say so.
+    // Infer cut: if R1+R2 strokes > madeCutStrokeLimit (worst made-cut total)
+    // and this player has no current-round data, they missed the cut.
     const validLsCount = (c.linescores ?? []).filter((ls) => {
       const v = typeof ls.value === "number" ? ls.value : parseFloat(String(ls.value ?? ""));
       return !isNaN(v) && v > 0;
     }).length;
     let playerStrokesThru2: number | null = null;
     {
-      const v0 = c.linescores?.[0]?.value;
-      const v1 = c.linescores?.[1]?.value;
-      const n0 = typeof v0 === "number" ? v0 : parseFloat(String(v0 ?? ""));
-      const n1 = typeof v1 === "number" ? v1 : parseFloat(String(v1 ?? ""));
-      if (!isNaN(n0) && n0 > 0 && !isNaN(n1) && n1 > 0) playerStrokesThru2 = n0 + n1;
+      const v0raw = c.linescores?.[0]?.value;
+      const v1raw = c.linescores?.[1]?.value;
+      const v0 = typeof v0raw === "number" ? v0raw : parseFloat(String(v0raw ?? ""));
+      const v1 = typeof v1raw === "number" ? v1raw : parseFloat(String(v1raw ?? ""));
+      if (!isNaN(v0) && v0 > 0 && !isNaN(v1) && v1 > 0) playerStrokesThru2 = v0 + v1;
     }
     const inferredCut =
       !explicitCutLike &&
       currentPeriod >= 3 &&
       validLsCount < currentPeriod &&
-      strokeCutLine !== null &&
+      madeCutStrokeLimit !== null &&
       playerStrokesThru2 !== null &&
-      playerStrokesThru2 >= strokeCutLine;
+      playerStrokesThru2 > madeCutStrokeLimit;
 
     const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;
