@@ -1,65 +1,62 @@
 # Golf Pool Weekly
 
-A lightweight MVP for running a weekly PGA pool:
+A web app for running a weekly PGA Tour pick-em pool. Commissioners create a pool tied to an upcoming tournament, invite players to draft a team of six golfers across odds-based tiers, and a live leaderboard tracks each team's score throughout the tournament.
 
-- Magic-link style auth flow for registration and login
-- Commissioner pool creation with tournament selection
-- DraftKings-backed tournament import for upcoming events and outright odds
+## Features
+
+- Magic-link authentication (Supabase OTP)
+- Commissioner pool creation with tournament selection from DraftKings Sportsbook
 - Six odds-based tiers with one golfer drafted per tier
-- Team scoring that counts the best four golfers who made the cut
-- Leaderboard view and pool join/share flows
+- Team scoring: best four golfers who made the cut
+- Live leaderboard with tiebreaker support and analytics tab
+- Automated score syncing via GitHub Actions (Thu–Sun during tournament hours)
+- Pool join via shareable invite code
 
 ## Stack
 
-- Next.js App Router
-- React 19
-- TypeScript
-- Supabase for auth and pool persistence
-- Browser-side cache for imported tournament feeds
+- Next.js 15 App Router
+- React 19 / TypeScript
+- Supabase (auth + database + realtime)
+- Tailwind CSS
 
-## Run locally
+## Local development
 
-1. `npm install`
-2. Optional: add Supabase env vars in `.env.local`
-2.5. Leave `NEXT_PUBLIC_ENABLE_SUPABASE=false` for local prototyping unless you explicitly want the Supabase flow on
-3. `npm run dev -- --port 3005`
-4. Open `http://localhost:3005`
+```bash
+npm install
+cp .env.example .env.local   # fill in Supabase credentials
+npm run dev -- --port 3005
+```
 
-Or use `make`:
+Or via `make`:
 
-- `make install`
-- `make run`
-- `make build`
-- `make start`
-- `make lint`
+```bash
+make install
+make run     # clears .next and starts on port 3005
+make build
+make lint
+```
 
-## Tournament ingestion
+## Environment variables
 
-- The commissioner flow can import upcoming golf tournaments from [DraftKings Sportsbook](https://sportsbook.draftkings.com/sports/golf).
-- Outright odds are currently parsed from the linked DraftKings Network "full field odds" article for each tournament.
-- Imported tournaments and golfers are cached in the browser so they remain available after refresh.
-- Tiers are auto-generated from implied probability and can still be adjusted by the commissioner before pool creation.
-- Course details, purse, and lock time are still best-effort placeholders when DraftKings does not expose them cleanly on the public page.
+See `.env.example` for the required variables:
 
-## Prototype notes
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server-side only) |
+| `CRON_SECRET` | Shared secret for the score-sync cron route — must match the `CRON_SECRET` GitHub Actions secret |
 
-- The "magic link" is exposed in the UI instead of sending a real email when Supabase is not configured.
-- Pool, membership, and entry data persist in Supabase when env vars are present.
-- A production version would likely still add:
-  - A more stable odds/feed provider or a hardened DraftKings ingestion pipeline
-  - A live PGA leaderboard feed for tournament scoring
-  - Real outbound email delivery for magic links and invites
-
-## Supabase setup
+## Database setup
 
 1. Create a Supabase project.
-2. Run [supabase/schema.sql](/Users/aaronsmith/Code/golf_pool/supabase/schema.sql) in the SQL editor.
-3. Copy [.env.example](/Users/aaronsmith/Code/golf_pool/.env.example) to `.env.local` and fill in your project URL and anon key.
-4. Set `NEXT_PUBLIC_ENABLE_SUPABASE=true` when you want to use the live Supabase-backed flow.
-5. In Supabase Auth, add `http://localhost:3000/auth/confirm`, `http://localhost:3005/auth/confirm`, and your Vercel production URL equivalent to the allowed redirect URLs.
-6. Start the app. When the env vars are present and `NEXT_PUBLIC_ENABLE_SUPABASE=true`, auth, pools, memberships, and entries persist in Supabase instead of localStorage.
+2. Run `supabase/schema.sql` in the SQL editor, then run any numbered migrations in `supabase/migrations/` in order.
+3. In Supabase Auth, add your local dev URL (`http://localhost:3005/auth/confirm`) and production URL to the allowed redirect URLs.
 
-## Shared tournament data
+## Automated score syncing
 
-- Tournament imports are now stored in Supabase so the imported field is shared across users and devices.
-- If you already ran an older version of [supabase/schema.sql](/Users/aaronsmith/Code/golf_pool/supabase/schema.sql), run it again so the new `tournaments` and `golfers` tables plus their RLS policies are created.
+A GitHub Actions workflow (`.github/workflows/sync-scores.yml`) hits `/api/scores/cron` every 10 minutes on Thursday–Sunday during tournament hours. To activate it, uncomment the `schedule:` cron lines in the workflow file and ensure the `APP_URL` and `CRON_SECRET` secrets are set in the GitHub repo settings.
+
+## Docs
+
+- [Engineering Roadmap](docs/ROADMAP.md)
