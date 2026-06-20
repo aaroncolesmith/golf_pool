@@ -343,6 +343,25 @@ export async function GET(request: Request) {
     }
   }
 
+  // Pre-scan: compute the cut line from players ESPN explicitly marks STATUS_CUT
+  // with a numeric score. ESPN doesn't always set STATUS_CUT for every missed-cut
+  // player (some appear with a numeric score and no explicit status). The minimum
+  // score among known-cut players IS the cut line — any other player at or above
+  // it also missed the cut. This is always safe: if the cut is at +4, a player
+  // at +5 cannot be active regardless of their linescore count.
+  let inferredCutLine: number | null = null;
+  if (currentPeriod >= 3) {
+    const cutScores: number[] = [];
+    for (const c of competitors) {
+      const sn = c.status?.type?.name ?? "";
+      const st = (c.score ?? "").trim().toUpperCase();
+      if (sn === "STATUS_CUT" && !["CUT", "WD", "DQ", "MDF"].includes(st)) {
+        cutScores.push(parseScoreToPar(c.score));
+      }
+    }
+    if (cutScores.length > 0) inferredCutLine = Math.min(...cutScores);
+  }
+
   // Build golfer list
   const rawGolfers = competitors.map((c): TournamentGolfer & { _scoreToParInt: number } => {
     const statusName = c.status?.type?.name ?? "";
@@ -356,12 +375,26 @@ export async function GET(request: Request) {
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
 
-    // Trust ESPN's explicit cut/wd/dq status. Do NOT infer cut from linescore count —
-    // at the start of a new round most players have no score for that round yet,
-    // which would wrongly mark the entire field as cut.
-    const isCutLike = explicitCutLike;
-    const madeCut = !isCutLike;
     const scoreToParInt = parseScoreToPar(scoreValue);
+
+    // Infer cut when ESPN hasn't set STATUS_CUT but the player's score is at or
+    // above the cut line and they have no current-round data. At the start of a
+    // new round ALL players have no current-round data, but then inferredCutLine
+    // is null (no explicit CUT players yet), so this stays silent until at least
+    // one player is officially marked cut by ESPN.
+    const validLsCount = (c.linescores ?? []).filter((ls) => {
+      const v = typeof ls.value === "number" ? ls.value : parseFloat(String(ls.value ?? ""));
+      return !isNaN(v) && v > 0;
+    }).length;
+    const inferredCut =
+      !explicitCutLike &&
+      currentPeriod >= 3 &&
+      validLsCount < currentPeriod &&
+      inferredCutLine !== null &&
+      scoreToParInt >= inferredCutLine;
+
+    const isCutLike = explicitCutLike || inferredCut;
+    const madeCut = !isCutLike;
 
     const roundScores: Record<number, number | null> = {};
     if (c.linescores) {

@@ -242,22 +242,53 @@ function parseCompetitors(
   );
   const effectivePeriod = Math.max(competitionPeriod, maxRoundsPlayed);
 
+  // Pre-scan: compute the cut line from players ESPN explicitly marks STATUS_CUT
+  // with a numeric score. The minimum score among known-cut players IS the cut line;
+  // any other player at or above it also missed the cut. This is always safe —
+  // if the cut is at +4, a player at +5 cannot be active regardless of linescore count.
+  // We only activate this when effectivePeriod >= 3 (cut has happened).
+  let inferredCutLine: number | null = null;
+  if (effectivePeriod >= 3) {
+    const cutScores: number[] = [];
+    for (const c of competitors) {
+      const sn = c.status?.type?.name ?? "";
+      const st = (c.score ?? "").trim().toUpperCase();
+      if (sn === "STATUS_CUT" && !["CUT", "WD", "DQ", "MDF"].includes(st)) {
+        cutScores.push(parseScoreToPar(c.score ?? ""));
+      }
+    }
+    if (cutScores.length > 0) inferredCutLine = Math.min(...cutScores);
+  }
+
   const rawGolfers: GolferScoreUpdate[] = competitors.map((c) => {
     const statusName = c.status?.type?.name ?? "";
     const scoreValue = c.score ?? "";
     const scoreTrimmed = scoreValue.trim().toUpperCase();
 
     // --- Cut detection ---
-    // Trust ESPN's explicit status only. Do NOT infer cut from linescore count —
-    // at the start of R3/R4 players who haven't teed off yet have no score for
-    // that round, which would wrongly mark the entire field as cut and corrupt
-    // the DB when the cron job runs.
-    const isCutLike =
+    const explicitCutLike =
       CUT_STATUSES.has(statusName) ||
       scoreTrimmed === "CUT" ||
       scoreTrimmed === "WD" ||
       scoreTrimmed === "DQ" ||
       scoreTrimmed === "MDF";
+
+    // Infer cut when ESPN hasn't set STATUS_CUT but the player's score is at or
+    // above the cut line and they have no current-round data. At the start of a
+    // new round ALL players have no current-round data, but inferredCutLine is null
+    // until at least one player is officially marked cut, so this stays silent then.
+    const validLsCount = (c.linescores ?? []).filter((ls) => {
+      const v = typeof ls.value === "string" ? parseFloat(ls.value) : ls.value;
+      return typeof v === "number" && !isNaN(v) && v > 0;
+    }).length;
+    const inferredCut =
+      !explicitCutLike &&
+      effectivePeriod >= 3 &&
+      validLsCount < effectivePeriod &&
+      inferredCutLine !== null &&
+      parseScoreToPar(scoreValue) >= inferredCutLine;
+
+    const isCutLike = explicitCutLike || inferredCut;
     const madeCut = !isCutLike;
 
     // --- Rounds complete ---
