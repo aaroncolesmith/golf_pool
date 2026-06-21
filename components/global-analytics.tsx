@@ -140,6 +140,7 @@ function AllTimeStandings({
               { label: "Rank", align: "center" },
               { label: "Player", align: "left" },
               { label: "Pools", align: "center" },
+              { label: "Points", align: "center" },
               { label: "Wins", align: "center" },
               { label: "Top 3", align: "center" },
               { label: "Avg Pos", align: "center" },
@@ -223,6 +224,17 @@ function AllTimeStandings({
                   style={{
                     padding: "10px",
                     textAlign: "center",
+                    fontWeight: 800,
+                    fontSize: "0.95rem",
+                    color: "var(--primary)",
+                  }}
+                >
+                  {p.totalPoints}
+                </td>
+                <td
+                  style={{
+                    padding: "10px",
+                    textAlign: "center",
                     fontWeight: p.wins > 0 ? 800 : 400,
                     color: p.wins > 0 ? "#2ca25f" : "var(--muted)",
                   }}
@@ -276,7 +288,8 @@ function AllTimeStandings({
         </tbody>
       </table>
       <p style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: 8 }}>
-        Ranked by avg percentile finish — accounts for different field sizes across pools.
+        Points: 1st = 100, 2nd = 50, 3rd = 25, survived cut = 10, eliminated = 0.
+        Ranked by total points — rewards both performance and participation.
         Style = position std deviation (low = consistent, high = streaky).
       </p>
     </div>
@@ -696,11 +709,14 @@ function GolferImpactSection({ impact }: { impact: GolferImpactRow[] }) {
     .sort((a, b) => (a.avgScoreToPar ?? 99) - (b.avgScoreToPar ?? 99))
     .slice(0, 7);
 
-  // Villains: most missed cuts or worst scores when they do play
+  // Villains: sort by raw missed cuts descending (absolute team damage),
+  // then worst avg score among those who did make some cuts.
+  // Only include golfers who actually missed at least one cut.
   const villains = [...impact]
+    .filter((g) => g.missedCuts > 0)
     .sort((a, b) => {
-      if (Math.abs(a.cutRate - b.cutRate) > 0.05) return a.cutRate - b.cutRate;
-      return (b.avgScoreToPar ?? -99) - (a.avgScoreToPar ?? -99);
+      if (b.missedCuts !== a.missedCuts) return b.missedCuts - a.missedCuts;
+      return a.cutRate - b.cutRate; // lower cut rate = worse
     })
     .slice(0, 7);
 
@@ -1055,10 +1071,7 @@ function SummaryCallouts({
   const leader = playerStats[0];
   const myStats = playerStats.find((p) => p.userId === currentUserId);
 
-  const mostConsistent = [...playerStats]
-    .filter((p) => p.totalTournaments >= 2)
-    .sort((a, b) => a.positionStdDev - b.positionStdDev)[0];
-
+  const pointsLeader = playerStats[0]; // already sorted by totalPoints
   const biggestWinner = playerStats.find((p) => p.wins > 0);
 
   return (
@@ -1070,32 +1083,32 @@ function SummaryCallouts({
       }}
     >
       <StatCallout
-        label="Total Pools"
+        label="Completed Pools"
         value={`${totalPools}`}
         sub={`${totalPlayers} players tracked`}
         color="var(--primary)"
       />
+      {pointsLeader && (
+        <StatCallout
+          label="Points Leader"
+          value={`${pointsLeader.userName}`}
+          sub={`${pointsLeader.totalPoints} pts across ${pointsLeader.totalTournaments} pool${pointsLeader.totalTournaments !== 1 ? "s" : ""}`}
+          color="#2ca25f"
+        />
+      )}
       {biggestWinner && (
         <StatCallout
           label="Most Wins"
           value={`${biggestWinner.userName}`}
           sub={`${biggestWinner.wins} win${biggestWinner.wins !== 1 ? "s" : ""} (${Math.round(biggestWinner.winRate * 100)}% win rate)`}
-          color="#2ca25f"
-        />
-      )}
-      {mostConsistent && (
-        <StatCallout
-          label="Most Consistent"
-          value={mostConsistent.userName}
-          sub={`Avg pos ${mostConsistent.avgPosition.toFixed(1)} · std dev ${mostConsistent.positionStdDev.toFixed(1)}`}
-          color="#7b2fb5"
+          color="#e07628"
         />
       )}
       {myStats && (
         <StatCallout
-          label="Your Record"
-          value={`${myStats.wins}W / ${myStats.totalTournaments - myStats.wins}L`}
-          sub={`Avg ${ordinal(Math.round(myStats.avgPosition))} · best ${ordinal(myStats.bestPosition)}`}
+          label="Your Points"
+          value={`${myStats.totalPoints} pts`}
+          sub={`${myStats.wins}W · avg ${ordinal(Math.round(myStats.avgPosition))} · best ${ordinal(myStats.bestPosition)}`}
           color="#1c6ee7"
         />
       )}
@@ -1186,7 +1199,7 @@ export function GlobalAnalytics() {
 
         <Section
           title="All-Time Rankings"
-          subtitle="Overall standings across every pool. Ranked by average percentile finish to fairly compare pools of different sizes."
+          subtitle="Overall standings across completed pools only. Ranked by total points (1st=100, 2nd=50, 3rd=25, survived=10, eliminated=0) — rewards both performance and participation."
         >
           <AllTimeStandings
             playerStats={playerStats}

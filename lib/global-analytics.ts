@@ -11,6 +11,7 @@ export type TournamentResult = {
   position: number; // 1-indexed rank
   totalEntrants: number;
   teamScore: number | null;
+  points: number;
   userId: string;
   userName: string;
   countingGolfers: Golfer[];
@@ -30,6 +31,7 @@ export type PlayerStats = {
   positionStdDev: number;
   totalTournaments: number;
   winRate: number;
+  totalPoints: number; // 1st=100, 2nd=50, 3rd=25, survived=10, eliminated=0
 };
 
 export type GolferImpactRow = {
@@ -59,6 +61,15 @@ function stdDev(values: number[]): number {
   return Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length);
 }
 
+/** Points awarded per pool finish. Eliminated teams (< 4 golfers made cut) score 0. */
+export function pointsForResult(position: number, teamScore: number | null): number {
+  if (teamScore === null) return 0; // team was eliminated
+  if (position === 1) return 100;
+  if (position === 2) return 50;
+  if (position === 3) return 25;
+  return 10; // survived the cut
+}
+
 export function normalizeName(name: string): string {
   return name
     .toLowerCase()
@@ -69,19 +80,21 @@ export function normalizeName(name: string): string {
     .trim();
 }
 
-/** Build per-pool results for every submitted entry in every locked pool. */
+/** Build per-pool results for every submitted entry in every COMPLETED pool. */
 export function buildGlobalResults(state: AppState): TournamentResult[] {
   const results: TournamentResult[] = [];
   const userMap = new Map(state.users.map((u) => [u.id, u]));
 
   for (const pool of state.pools) {
     const tournament = state.tournaments.find((t) => t.id === pool.tournamentId);
-    if (!tournament || !pool.tiersSubmittedAt) continue;
+    // Only include pools from fully finished tournaments
+    if (!tournament || tournament.status !== "finished" || !pool.tiersSubmittedAt) continue;
 
     const leaderboard = buildLeaderboard(state, pool);
     if (leaderboard.length === 0) continue;
 
     leaderboard.forEach((row, idx) => {
+      const position = idx + 1;
       results.push({
         poolId: pool.id,
         poolName: pool.name,
@@ -89,9 +102,10 @@ export function buildGlobalResults(state: AppState): TournamentResult[] {
         tournamentName: tournament.name,
         tournamentDate: tournament.startDate,
         tournamentStatus: tournament.status,
-        position: idx + 1,
+        position,
         totalEntrants: leaderboard.length,
         teamScore: row.teamScore,
+        points: pointsForResult(position, row.teamScore),
         userId: row.userId,
         userName: userMap.get(row.userId)?.userName ?? row.teamName,
         countingGolfers: row.countingGolfers,
@@ -119,6 +133,7 @@ export function buildPlayerStats(results: TournamentResult[]): PlayerStats[] {
         (r) => (r.totalEntrants - r.position + 1) / r.totalEntrants,
       );
       const wins = userResults.filter((r) => r.position === 1).length;
+      const totalPoints = userResults.reduce((sum, r) => sum + r.points, 0);
       return {
         userId: userResults[0].userId,
         userName: userResults[0].userName,
@@ -135,12 +150,13 @@ export function buildPlayerStats(results: TournamentResult[]): PlayerStats[] {
         positionStdDev: stdDev(positions),
         totalTournaments: userResults.length,
         winRate: wins / userResults.length,
+        totalPoints,
       };
     })
+    // Primary sort: total points (rewards both performance + participation)
     .sort((a, b) => {
-      if (Math.abs(b.avgPercentileScore - a.avgPercentileScore) > 0.001)
-        return b.avgPercentileScore - a.avgPercentileScore;
-      return a.avgPosition - b.avgPosition;
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+      return b.avgPercentileScore - a.avgPercentileScore;
     });
 }
 
