@@ -96,6 +96,8 @@ export type EspnSyncResult = {
   eventName: string;
   golfers: GolferScoreUpdate[];
   fetchedAt: string;
+  /** True when ESPN's competition status is STATUS_FINAL — authoritative tournament-complete signal. */
+  tournamentComplete: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -475,11 +477,15 @@ async function fetchAndParse(url: string, tournamentName: string): Promise<EspnS
 
   const golfers = parseCompetitors(competitors, competitionPeriod, coreStatusMap);
 
+  const tournamentComplete =
+    competition?.status?.type?.name === "STATUS_FINAL";
+
   return {
     eventId: event.id,
     eventName: event.name,
     golfers,
     fetchedAt: new Date().toISOString(),
+    tournamentComplete,
   };
 }
 

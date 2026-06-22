@@ -197,13 +197,13 @@ export async function GET(request: Request) {
         }
       }
 
-      // Auto-detect completion: same logic as manual sync route.
-      // If every golfer who made the cut has 4 rounds complete, the tournament is done.
-      // Note: playoff holes don't increment roundsComplete, so this stays correct
-      // for playoffs once we understand that data structure — revisit if needed.
-      const allActiveFinished = espnResult.golfers.every(
-        (g) => !g.madeCut || g.roundsComplete >= 4,
-      );
+      // Auto-detect completion: trust ESPN's STATUS_FINAL first (authoritative).
+      // Fall back to round-count check in case ESPN's status lags slightly.
+      // The round-count alone is insufficient — WD players mid-round can have
+      // madeCut:true but roundsComplete < 4, blocking completion indefinitely.
+      const allActiveFinished =
+        espnResult.tournamentComplete ||
+        espnResult.golfers.every((g) => !g.madeCut || g.roundsComplete >= 4);
       const newStatus = allActiveFinished ? "finished" : "in_progress";
 
       // Stamp scores_updated_at, persist the ESPN event ID, and update status
