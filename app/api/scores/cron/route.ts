@@ -157,10 +157,23 @@ export async function GET(request: Request) {
         }
       }
 
-      // Stamp scores_updated_at and persist the ESPN event ID for future lookups
+      // Auto-detect completion: same logic as manual sync route.
+      // If every golfer who made the cut has 4 rounds complete, the tournament is done.
+      // Note: playoff holes don't increment roundsComplete, so this stays correct
+      // for playoffs once we understand that data structure — revisit if needed.
+      const allActiveFinished = espnResult.golfers.every(
+        (g) => !g.madeCut || g.roundsComplete >= 4,
+      );
+      const newStatus = allActiveFinished ? "finished" : "in_progress";
+
+      // Stamp scores_updated_at, persist the ESPN event ID, and update status
       await supabase
         .from("tournaments")
-        .update({ scores_updated_at: espnResult.fetchedAt, espn_event_id: espnResult.eventId })
+        .update({
+          scores_updated_at: espnResult.fetchedAt,
+          espn_event_id: espnResult.eventId,
+          status: newStatus,
+        })
         .eq("id", tournament.id);
 
       console.log(
