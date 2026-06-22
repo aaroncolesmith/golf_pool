@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
-import { fetchEspnScores, normalizeGolferName } from "@/lib/espn";
+import {
+  fetchEspnScores,
+  fetchEspnScoresByDate,
+  fetchEspnScoresByEventId,
+  normalizeGolferName,
+} from "@/lib/espn";
 import { createClient } from "@supabase/supabase-js";
 
 /**
  * GET /api/scores/cron
  *
- * Called by GitHub Actions on a schedule during tournament rounds.
+ * Called by GitHub Actions on a schedule during and after tournament rounds.
  * Syncs ESPN scores for every tournament currently marked `in_progress`.
+ *
+ * Uses the same multi-strategy fetch as the manual sync route so that
+ * recently-finished tournaments (which drop off ESPN's current scoreboard)
+ * are still found via their stored espn_event_id or a dated scoreboard URL.
  *
  * Protected by CRON_SECRET env var — caller must pass:
  *   Authorization: Bearer <CRON_SECRET>
@@ -36,10 +45,10 @@ export async function GET(request: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
 
-  // Find all in-progress tournaments
+  // Find all in-progress tournaments, including espn_event_id + start_date for fallback fetching
   const { data: tournaments, error: tError } = await supabase
     .from("tournaments")
-    .select("id, name")
+    .select("id, name, espn_event_id, start_date")
     .eq("status", "in_progress");
 
   if (tError) {
@@ -55,9 +64,40 @@ export async function GET(request: Request) {
 
   for (const tournament of tournaments) {
     try {
-      const espnResult = await fetchEspnScores(tournament.name as string);
+      const tName = tournament.name as string;
+      const eventId = (tournament.espn_event_id as string | null) ?? null;
+      const startDate = (tournament.start_date as string | null) ?? null;
+
+      // Build a prioritized fetch strategy — mirrors the manual sync route.
+      // Try espn_event_id first (most reliable: works even after a tournament
+      // leaves the live scoreboard). Fall back to current scoreboard name-match,
+      // then dated scoreboards for the expected final-round dates.
+      type Strategy = () => Promise<Awaited<ReturnType<typeof fetchEspnScores>>>;
+      const strategies: Strategy[] = [];
+
+      if (eventId) {
+        strategies.push(() => fetchEspnScoresByEventId(eventId, tName));
+      }
+      strategies.push(() => fetchEspnScores(tName));
+
+      if (startDate) {
+        const base = new Date(startDate);
+        for (const offset of [3, 2, 4, 1, 0]) {
+          const d = new Date(base);
+          d.setUTCDate(d.getUTCDate() + offset);
+          const yyyymmdd = d.toISOString().slice(0, 10).replace(/-/g, "");
+          strategies.push(() => fetchEspnScoresByDate(tName, yyyymmdd));
+        }
+      }
+
+      let espnResult: Awaited<ReturnType<typeof fetchEspnScores>> = null;
+      for (const strategy of strategies) {
+        espnResult = await strategy();
+        if (espnResult) break;
+      }
+
       if (!espnResult) {
-        console.warn(`[cron] ESPN returned no data for tournament: ${tournament.name}`);
+        console.warn(`[cron] ESPN returned no data for tournament: ${tName}`);
         results.push({ tournamentId: tournament.id, ok: false, error: "No ESPN data" });
         continue;
       }
@@ -177,7 +217,7 @@ export async function GET(request: Request) {
         .eq("id", tournament.id);
 
       console.log(
-        `[cron] ${tournament.name}: updated ${updates.length}, unmatched ${unmatched.length}`,
+        `[cron] ${tName}: updated ${updates.length}, unmatched ${unmatched.length}, status → ${newStatus}`,
       );
 
       results.push({
@@ -187,6 +227,7 @@ export async function GET(request: Request) {
         updated: updates.length,
         unmatched,
         fetchedAt: espnResult.fetchedAt,
+        status: newStatus,
       });
     } catch (err) {
       console.error(`[cron] Unexpected error for ${tournament.id}:`, err);
