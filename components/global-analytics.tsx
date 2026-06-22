@@ -1072,7 +1072,8 @@ function SummaryCallouts({
   const myStats = playerStats.find((p) => p.userId === currentUserId);
 
   const pointsLeader = playerStats[0]; // already sorted by totalPoints
-  const biggestWinner = playerStats.find((p) => p.wins > 0);
+  const maxWins = Math.max(0, ...playerStats.map((p) => p.wins));
+  const winners = maxWins > 0 ? playerStats.filter((p) => p.wins === maxWins) : [];
 
   return (
     <div
@@ -1096,11 +1097,11 @@ function SummaryCallouts({
           color="#2ca25f"
         />
       )}
-      {biggestWinner && (
+      {winners.length > 0 && (
         <StatCallout
           label="Most Wins"
-          value={`${biggestWinner.userName}`}
-          sub={`${biggestWinner.wins} win${biggestWinner.wins !== 1 ? "s" : ""} (${Math.round(biggestWinner.winRate * 100)}% win rate)`}
+          value={winners.map((w) => w.userName).join(" · ")}
+          sub={`${maxWins} win${maxWins !== 1 ? "s" : ""} each${winners.length > 1 ? ` (${winners.length}-way tie)` : ` (${Math.round(winners[0].winRate * 100)}% win rate)`}`}
           color="#e07628"
         />
       )}
