@@ -48,8 +48,8 @@ export async function GET(request: Request) {
   // Find all in-progress tournaments, including espn_event_id + start_date for fallback fetching
   const { data: tournaments, error: tError } = await supabase
     .from("tournaments")
-    .select("id, name, espn_event_id, start_date")
-    .eq("status", "in_progress");
+    .select("id, name, espn_event_id, start_date, status")
+    .in("status", ["upcoming", "in_progress"]);
 
   if (tError) {
     console.error("[cron] Failed to load tournaments:", tError);
@@ -57,7 +57,7 @@ export async function GET(request: Request) {
   }
 
   if (!tournaments || tournaments.length === 0) {
-    return NextResponse.json({ ok: true, results: [], message: "No tournaments in progress." });
+    return NextResponse.json({ ok: true, results: [], message: "No active tournaments." });
   }
 
   const results = [];
@@ -199,11 +199,12 @@ export async function GET(request: Request) {
 
       // Auto-detect completion: trust ESPN's STATUS_FINAL first (authoritative).
       // Fall back to round-count check in case ESPN's status lags slightly.
-      // The round-count alone is insufficient — WD players mid-round can have
-      // madeCut:true but roundsComplete < 4, blocking completion indefinitely.
+      // Guard with hasScores to avoid vacuously-true close on tournaments with
+      // no rounds yet (empty golfer array → every() trivially returns true).
+      const hasScores = espnResult.golfers.some((g) => g.roundsComplete > 0);
       const allActiveFinished =
         espnResult.tournamentComplete ||
-        espnResult.golfers.every((g) => !g.madeCut || g.roundsComplete >= 4);
+        (hasScores && espnResult.golfers.every((g) => !g.madeCut || g.roundsComplete >= 4));
       const newStatus = allActiveFinished ? "finished" : "in_progress";
 
       // Stamp scores_updated_at, persist the ESPN event ID, and update status
