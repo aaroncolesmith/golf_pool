@@ -1,15 +1,19 @@
 name: Sync Golf Scores
 
 on:
-  schedule:
-    # Every 10 minutes, Thursday–Sunday, 7am–9pm ET (11:00–01:00 UTC)
-    # Cron runs in UTC. ET = UTC-4 (EDT). 7am ET = 11:00 UTC, 9pm ET = 01:00 UTC next day.
-    #
-    # GitHub Actions cron does not support day-of-week ranges natively, so we
-    # use four separate schedules (Thu=4, Fri=5, Sat=6, Sun=0).
-    - cron: "*/10 11-23 * * 4,5,6"   # Thu/Fri/Sat 11:00–23:50 UTC (7am–7:50pm ET)
-    - cron: "*/10 0-1  * * 5,6,0"    # Fri/Sat/Sun 00:00–01:50 UTC (8pm–9:50pm ET prior day)
-    - cron: "0 11-14  * * 1"          # Mon 11:00–14:00 UTC (7am–10am ET) — cleanup pass for Sunday finishers
+  # Schedule disabled between tournaments — re-enable when next tournament begins.
+  # To re-enable, uncomment the schedule block below and verify the APP_URL
+  # GitHub secret points to the correct production URL.
+  #
+  # schedule:
+  #   # Every 10 minutes, Thursday–Sunday, 7am–9pm ET (11:00–01:00 UTC)
+  #   # Cron runs in UTC. ET = UTC-4 (EDT). 7am ET = 11:00 UTC, 9pm ET = 01:00 UTC next day.
+  #   #
+  #   # GitHub Actions cron does not support day-of-week ranges natively, so we
+  #   # use four separate schedules (Thu=4, Fri=5, Sat=6, Sun=0).
+  #   - cron: "*/10 11-23 * * 4,5,6"   # Thu/Fri/Sat 11:00–23:50 UTC (7am–7:50pm ET)
+  #   - cron: "*/10 0-1  * * 5,6,0"    # Fri/Sat/Sun 00:00–01:50 UTC (8pm–9:50pm ET prior day)
+  #   - cron: "0 11-14  * * 1"          # Mon 11:00–14:00 UTC (7am–10am ET) — cleanup pass for Sunday finishers
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
