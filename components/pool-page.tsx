@@ -811,18 +811,29 @@ function TiersTab({
   }
 
   async function handleRefreshOdds() {
-    if (!tournament.id.startsWith("dk-")) {
-      setMessage("Odds refresh is only available for DraftKings tournaments.");
+    const isEspn = tournament.id.startsWith("espn-");
+    const isDk = tournament.id.startsWith("dk-");
+
+    if (!isEspn && !isDk) {
+      setMessage("Odds refresh is not available for this tournament.");
       return;
     }
-    const slug = tournament.id.slice(3);
-    const leagueId = tournament.importMeta?.leagueId;
+
     setIsRefreshing(true);
     setMessage(null);
     try {
-      const params = new URLSearchParams();
-      if (leagueId) params.set("leagueId", String(leagueId));
-      const res = await fetch(`/api/draftkings/tournament/${slug}${params.size ? `?${params.toString()}` : ""}`);
+      let res: Response;
+      if (isEspn) {
+        const eventId = tournament.id.slice(5);
+        res = await fetch(`/api/espn/tournament/${eventId}`);
+      } else {
+        const slug = tournament.id.slice(3);
+        const leagueId = tournament.importMeta?.leagueId;
+        const params = new URLSearchParams();
+        if (leagueId) params.set("leagueId", String(leagueId));
+        res = await fetch(`/api/draftkings/tournament/${slug}${params.size ? `?${params.toString()}` : ""}`);
+      }
+
       const payload = (await res.json()) as Partial<TournamentImportPayload> & { error?: string };
       if (!res.ok || !payload.tournament || !payload.golfers) {
         throw new Error(payload.error ?? "Failed to refresh odds.");

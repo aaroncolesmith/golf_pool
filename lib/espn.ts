@@ -629,18 +629,13 @@ export async function importEspnTournament(eventId: string): Promise<EspnTournam
     .map((c) => {
       const normalizedName = normalizeGolferName(c.athlete.displayName);
       const americanOdds = anOddsMap.get(normalizedName) ?? 0;
-      const order = c.order ?? 0;
 
-      let impliedProbability: number;
-      if (americanOdds > 0) {
-        // Derive from American odds: probability = 100 / (odds + 100)
-        impliedProbability = 100 / (americanOdds + 100);
-      } else if (order > 0) {
-        // Fall back to inverse of ESPN field order
-        impliedProbability = 1 / order;
-      } else {
-        impliedProbability = 0;
-      }
+      // Derive implied probability from American odds only.
+      // Do NOT fall back to ESPN's field order — it reflects registration
+      // or alphabetical sequence, not win likelihood, and would incorrectly
+      // promote obscure players into upper tiers when AN odds are missing.
+      const impliedProbability =
+        americanOdds > 0 ? 100 / (americanOdds + 100) : 0;
 
       return {
         id: `${tournamentId}-${c.id}`,
