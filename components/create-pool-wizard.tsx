@@ -83,7 +83,7 @@ export function CreatePoolWizard() {
       setImportMessage(null);
 
       try {
-        const response = await fetch("/api/draftkings/upcoming");
+        const response = await fetch("/api/espn/upcoming");
         const payload = (await response.json()) as { tournaments?: UpcomingTournamentOption[]; error?: string };
 
         if (!response.ok) {
@@ -122,8 +122,7 @@ export function CreatePoolWizard() {
     setPoolMessage(null);
 
     try {
-      const selectedImport = importOptions.find((o) => o.slug === selectedImportSlug);
-      const tournamentId = `dk-${selectedImportSlug}`;
+      const tournamentId = `espn-${selectedImportSlug}`;
       const cachedTournament = state.tournaments.find((t) => t.id === tournamentId);
       const cachedGolfers = state.golfers.filter((g) => g.tournamentId === tournamentId);
 
@@ -134,11 +133,7 @@ export function CreatePoolWizard() {
         tournament = cachedTournament;
         golfers = cachedGolfers;
       } else {
-        const params = new URLSearchParams();
-        if (selectedImport?.leagueId) params.set("leagueId", selectedImport.leagueId);
-        const response = await fetch(
-          `/api/draftkings/tournament/${selectedImportSlug}${params.size ? `?${params.toString()}` : ""}`,
-        );
+        const response = await fetch(`/api/espn/tournament/${selectedImportSlug}`);
         const payload = (await response.json()) as Partial<TournamentImportResponse> & { error?: string };
 
         if (!response.ok || !payload.tournament || !payload.golfers) {

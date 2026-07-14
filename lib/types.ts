@@ -23,7 +23,7 @@ export type Tournament = {
   startDate: string;
   status: "upcoming" | "in_progress" | "finished";
   purse: string;
-  source?: "sample" | "draftkings";
+  source?: "sample" | "draftkings" | "espn";
   sourceUrl?: string;
   oddsSourceUrl?: string;
   importMeta?: {

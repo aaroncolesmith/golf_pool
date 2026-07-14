@@ -8,6 +8,8 @@
  * Server-only: this file must not be imported by client components.
  */
 
+import type { Tournament, Golfer } from "@/lib/types";
+
 // ---------------------------------------------------------------------------
 // Raw ESPN API types
 // ---------------------------------------------------------------------------
@@ -542,4 +544,120 @@ export async function fetchEspnScoresByEventId(
     `https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?event=${espnEventId}`,
     tournamentName,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Tournament import (replaces DraftKings as the source for pool creation)
+// ---------------------------------------------------------------------------
+
+export type EspnUpcomingTournament = {
+  id: string;
+  leagueId: string;
+  slug: string;
+  name: string;
+  startDate: string | null;
+  url: string;
+  oddsUrl: string;
+};
+
+export type EspnTournamentFeed = {
+  tournament: Tournament;
+  golfers: Golfer[];
+  oddsSourceUrl: string;
+};
+
+/** Returns all non-finished PGA Tour events from the ESPN scoreboard. */
+export async function getUpcomingEspnTournaments(): Promise<EspnUpcomingTournament[]> {
+  const res = await fetch(
+    "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard",
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`ESPN scoreboard fetch failed: ${res.status}`);
+  const data = (await res.json()) as EspnScoreboard;
+
+  return (data.events ?? [])
+    .filter((e) => e.competitions?.[0]?.status?.type?.name !== "STATUS_FINAL")
+    .map((e) => ({
+      id: e.id,
+      leagueId: e.id,
+      slug: e.id,
+      name: e.name,
+      startDate: e.date ?? null,
+      url: `https://www.espn.com/golf/leaderboard?tournamentId=${e.id}`,
+      oddsUrl: `https://www.espn.com/golf/leaderboard?tournamentId=${e.id}`,
+    }));
+}
+
+/**
+ * Fetch the full competitor field for an ESPN event and return it in the
+ * same shape that DraftKings previously provided to the create-pool wizard.
+ * Golfers are ordered by ESPN's leaderboard order field so that tier 1
+ * starts with the favourites.
+ */
+export async function importEspnTournament(eventId: string): Promise<EspnTournamentFeed> {
+  const res = await fetch(
+    `https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?event=${eventId}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`ESPN event fetch failed: ${res.status}`);
+  const data = (await res.json()) as EspnScoreboard;
+
+  const event = data.events?.[0];
+  if (!event) throw new Error("ESPN event not found.");
+
+  const competition = event.competitions?.[0];
+  const competitors = competition?.competitors ?? [];
+  if (competitors.length === 0) {
+    throw new Error("The field for this tournament has not been announced yet on ESPN.");
+  }
+
+  const tournamentId = `espn-${eventId}`;
+  const golfers: Golfer[] = competitors
+    .map((c) => {
+      const order = c.order ?? 0;
+      return {
+        id: `${tournamentId}-${c.id}`,
+        name: c.athlete.displayName,
+        oddsAmerican: 0,
+        // Use inverse of ESPN order so tier-1 picks up favourites first.
+        // If order is 0/missing, sort to the back.
+        impliedProbability: order > 0 ? 1 / order : 0,
+        tournamentId,
+        currentScoreToPar: 0,
+        position: "TBD",
+        madeCut: true,
+        roundsComplete: 0,
+      };
+    })
+    .sort((a, b) => b.impliedProbability - a.impliedProbability);
+
+  const statusName = competition?.status?.type?.name;
+  const tournamentStatus: Tournament["status"] =
+    statusName === "STATUS_FINAL"
+      ? "finished"
+      : statusName === "STATUS_IN_PROGRESS"
+        ? "in_progress"
+        : "upcoming";
+
+  const oddsSourceUrl = `https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?event=${eventId}`;
+
+  const tournament: Tournament = {
+    id: tournamentId,
+    name: event.name,
+    course: "TBD",
+    startDate: event.date ?? new Date().toISOString(),
+    status: tournamentStatus,
+    purse: "TBD",
+    source: "espn",
+    sourceUrl: `https://www.espn.com/golf/leaderboard?tournamentId=${eventId}`,
+    oddsSourceUrl,
+    importMeta: {
+      leagueId: null,
+      eventId,
+      categoryId: null,
+      subcategoryId: null,
+    },
+  };
+
+  return { tournament, golfers, oddsSourceUrl };
 }
