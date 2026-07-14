@@ -215,6 +215,7 @@ const OPEN_2026_DK_FALLBACK: Record<string, number> = {
   "david duval": 500000,
   "cameron john": 500000,
   // Name aliases — ESPN uses different names than DraftKings for these players
+  "jeong-woo ham": 100000,         // not in DK paste; manually set
   "josele ballester": 49000,       // DK: "jose luis ballester"
   "thomas sloman": 500000,         // DK: "tom sloman"
   "johnny keefer": 24000,          // DK: "john keefer"
