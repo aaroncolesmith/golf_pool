@@ -9,6 +9,7 @@
  */
 
 import type { Tournament, Golfer } from "@/lib/types";
+import { getActionNetworkPgaOdds } from "@/lib/actionnetwork";
 
 // ---------------------------------------------------------------------------
 // Raw ESPN API types
@@ -612,16 +613,40 @@ export async function importEspnTournament(eventId: string): Promise<EspnTournam
   }
 
   const tournamentId = `espn-${eventId}`;
+
+  // Enrich with tournament winner odds from Action Network.
+  // AN odds are embedded in their SSR page — no API key needed.
+  // Fail silently and fall back to ESPN's field order if unavailable.
+  let anOddsMap = new Map<string, number>();
+  try {
+    const { oddsMap } = await getActionNetworkPgaOdds();
+    anOddsMap = oddsMap;
+  } catch {
+    // Fall back to ESPN order
+  }
+
   const golfers: Golfer[] = competitors
     .map((c) => {
+      const normalizedName = normalizeGolferName(c.athlete.displayName);
+      const americanOdds = anOddsMap.get(normalizedName) ?? 0;
       const order = c.order ?? 0;
+
+      let impliedProbability: number;
+      if (americanOdds > 0) {
+        // Derive from American odds: probability = 100 / (odds + 100)
+        impliedProbability = 100 / (americanOdds + 100);
+      } else if (order > 0) {
+        // Fall back to inverse of ESPN field order
+        impliedProbability = 1 / order;
+      } else {
+        impliedProbability = 0;
+      }
+
       return {
         id: `${tournamentId}-${c.id}`,
         name: c.athlete.displayName,
-        oddsAmerican: 0,
-        // Use inverse of ESPN order so tier-1 picks up favourites first.
-        // If order is 0/missing, sort to the back.
-        impliedProbability: order > 0 ? 1 / order : 0,
+        oddsAmerican: americanOdds,
+        impliedProbability,
         tournamentId,
         currentScoreToPar: 0,
         position: "TBD",
