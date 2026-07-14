@@ -37,11 +37,15 @@ export type ActionNetworkOdds = {
   oddsMap: Map<string, number>;
 };
 
-// Same normalization as ESPN's normalizeGolferName — keeps hyphens and apostrophes
-// so keys match what importEspnTournament uses for lookup.
+// Same normalization as ESPN's normalizeGolferName — keeps hyphens and apostrophes,
+// and explicitly maps characters that don't decompose under NFD (ø, æ, etc.)
 function normalizeName(name: string): string {
   return name
     .toLowerCase()
+    .replace(/ø/g, "o")
+    .replace(/æ/g, "ae")
+    .replace(/ð/g, "d")
+    .replace(/þ/g, "th")
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z\s'-]/g, "")
@@ -210,6 +214,12 @@ const OPEN_2026_DK_FALLBACK: Record<string, number> = {
   "mason howell": 500000,
   "david duval": 500000,
   "cameron john": 500000,
+  // Name aliases — ESPN uses different names than DraftKings for these players
+  "josele ballester": 49000,       // DK: "jose luis ballester"
+  "thomas sloman": 500000,         // DK: "tom sloman"
+  "johnny keefer": 24000,          // DK: "john keefer"
+  "nico echavarria": 41000,        // DK: "nicolas echavarria"
+  "bard bjornevik skogen": 500000, // DK: "baard skogen"
 };
 
 /**

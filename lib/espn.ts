@@ -198,8 +198,14 @@ function parseRoundStroke(ls: EspnLinescore | undefined): number | null {
 export function normalizeGolferName(name: string): string {
   return name
     .toLowerCase()
+    // Explicit substitutions for characters that don't decompose under NFD
+    // (ø stays ø after NFD — it would be stripped entirely without this)
+    .replace(/ø/g, "o")
+    .replace(/æ/g, "ae")
+    .replace(/ð/g, "d")
+    .replace(/þ/g, "th")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "") // strip diacritics
+    .replace(/[̀-ͯ]/g, "") // strip combining diacritics
     .replace(/[^a-z\s'-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
