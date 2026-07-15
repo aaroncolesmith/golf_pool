@@ -40,6 +40,8 @@ type TabId = "picks" | "tiers" | "leaderboard" | "analytics" | "members" | "chat
 // Tab: My Picks
 // ---------------------------------------------------------------------------
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 function PicksTab({
   pool,
   golferMap,
@@ -59,9 +61,10 @@ function PicksTab({
   const [selections, setSelections] = useState<TeamSelection[]>(
     existingEntry?.selections ?? [],
   );
-  const [draftMessage, setDraftMessage] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
   // Prevent server data from overwriting local state once the user starts editing
   const userIsEditingRef = useRef(false);
+  const isSavingRef = useRef(false);
 
   useEffect(() => {
     if (userIsEditingRef.current) return;
@@ -70,27 +73,43 @@ function PicksTab({
 
   const validation = validateSelections(pool, selections);
 
-  // Auto-save on every change. Submit when all picks are complete.
+  async function doSave(currentSelections: TeamSelection[]) {
+    if (isSavingRef.current || isLocked || currentSelections.length === 0) return;
+    isSavingRef.current = true;
+    setSaveState("saving");
+    try {
+      const isComplete = validateSelections(pool, currentSelections).isValid;
+      const entry = await saveEntry(pool.id, currentSelections, isComplete);
+      setSaveState(entry ? "saved" : "error");
+    } catch {
+      setSaveState("error");
+    } finally {
+      isSavingRef.current = false;
+    }
+  }
+
+  // Auto-save 800ms after any pick change — keeps running as a safety net,
+  // but the explicit Save button is the primary reliable path.
   useEffect(() => {
     if (selections.length === 0 || isLocked) return;
-    const isComplete = validation.isValid;
-    const timer = setTimeout(() => {
-      saveEntry(pool.id, selections, isComplete).then((entry) => {
-        if (entry && isComplete) {
-          setDraftMessage("All picks saved ✓");
-        }
-      });
-    }, 600);
+    setSaveState("idle");
+    const captured = selections;
+    const timer = setTimeout(() => { void doSave(captured); }, 800);
     return () => clearTimeout(timer);
-  }, [selections, pool.id, isLocked, saveEntry, validation.isValid]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selections, pool.id, isLocked]);
 
   function updateSelection(tierId: string, golferId: string) {
     userIsEditingRef.current = true;
-    setDraftMessage(null);
+    setSaveState("idle");
     setSelections((prev) => {
       const withoutTier = prev.filter((s) => s.tierId !== tierId);
       return [...withoutTier, { tierId, golferId }];
     });
+  }
+
+  function handleManualSave() {
+    void doSave(selections);
   }
 
   if (!currentUser) {
@@ -131,7 +150,8 @@ function PicksTab({
       golferMap={golferMap}
       selections={selections}
       onSelectionChange={updateSelection}
-      draftMessage={draftMessage}
+      onSave={handleManualSave}
+      saveState={saveState}
       existingSubmittedAt={existingEntry?.submittedAt ?? null}
       isLocked={isLocked}
       isValid={validation.isValid}

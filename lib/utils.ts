@@ -1,4 +1,4 @@
-export const APP_VERSION = "v2.3.13";
+export const APP_VERSION = "v2.3.14";
 
 export function formatDate(date: string) {
   return new Intl.DateTimeFormat("en-US", {

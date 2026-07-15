@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { Golfer, Pool, TeamSelection, Tier } from "@/lib/types";
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 type Props = {
   pool: Pool;
   golferMap: Map<string, Golfer>;
   selections: TeamSelection[];
   onSelectionChange: (tierId: string, golferId: string) => void;
-  draftMessage: string | null;
+  onSave: () => void;
+  saveState: SaveState;
   existingSubmittedAt: string | null;
   isLocked: boolean;
   isValid: boolean;
@@ -115,7 +118,8 @@ export function DraftBoard({
   golferMap,
   selections,
   onSelectionChange,
-  draftMessage,
+  onSave,
+  saveState,
   existingSubmittedAt,
   isLocked,
   isValid,
@@ -255,16 +259,33 @@ export function DraftBoard({
         })}
       </div>
 
-      {/* ── Status line ── */}
-      <p className="small muted" style={{ marginTop: 4, textAlign: "center", minHeight: "1.4em" }}>
-        {draftMessage
-          ? draftMessage
-          : isValid
-            ? "All picks saved ✓"
-            : selections.length > 0
-              ? `${selections.length} of ${totalTiers} picks made`
-              : null}
-      </p>
+      {/* ── Save button + status ── */}
+      {selections.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, marginTop: 8 }}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={onSave}
+            disabled={saveState === "saving"}
+            style={{ minWidth: 160 }}
+          >
+            {saveState === "saving"
+              ? "Saving…"
+              : saveState === "error"
+                ? "Save failed — Retry"
+                : "Save Picks"}
+          </button>
+          <p className="small muted" style={{ margin: 0, minHeight: "1.2em" }}>
+            {saveState === "saved"
+              ? "Picks saved ✓"
+              : saveState === "error"
+                ? "Could not save — check your connection"
+                : saveState === "idle" && !isValid
+                  ? `${selections.length} of ${totalTiers} picks made`
+                  : null}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
