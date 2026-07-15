@@ -88,17 +88,6 @@ function PicksTab({
     }
   }
 
-  // Auto-save 800ms after any pick change — keeps running as a safety net,
-  // but the explicit Save button is the primary reliable path.
-  useEffect(() => {
-    if (selections.length === 0 || isLocked) return;
-    setSaveState("idle");
-    const captured = selections;
-    const timer = setTimeout(() => { void doSave(captured); }, 800);
-    return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selections, pool.id, isLocked]);
-
   function updateSelection(tierId: string, golferId: string) {
     userIsEditingRef.current = true;
     setSaveState("idle");

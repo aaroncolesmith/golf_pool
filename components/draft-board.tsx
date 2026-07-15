@@ -170,16 +170,15 @@ export function DraftBoard({
 
   return (
     <div className="draft-board">
-      {/* ── Top bar: Back | tier chips ── */}
+      {/* ── Top bar: Save | tier chips ── */}
       <div className="draft-controls">
         <button
-          className="draft-nav-btn back"
+          className={`draft-nav-btn back${saveState === "error" ? " draft-save-error" : ""}`}
           type="button"
-          onClick={() => goTo(activeTierIndex - 1)}
-          disabled={activeTierIndex === 0}
-          aria-label="Previous tier"
+          onClick={onSave}
+          disabled={saveState === "saving" || selections.length === 0}
         >
-          ← Back
+          {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved ✓" : saveState === "error" ? "Retry" : "Save"}
         </button>
 
         {/* Tier chips */}
@@ -259,32 +258,16 @@ export function DraftBoard({
         })}
       </div>
 
-      {/* ── Save button + status ── */}
-      {selections.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, marginTop: 8 }}>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={onSave}
-            disabled={saveState === "saving"}
-            style={{ minWidth: 160 }}
-          >
-            {saveState === "saving"
-              ? "Saving…"
-              : saveState === "error"
-                ? "Save failed — Retry"
-                : "Save Picks"}
-          </button>
-          <p className="small muted" style={{ margin: 0, minHeight: "1.2em" }}>
-            {saveState === "saved"
-              ? "Picks saved ✓"
-              : saveState === "error"
-                ? "Could not save — check your connection"
-                : saveState === "idle" && !isValid
-                  ? `${selections.length} of ${totalTiers} picks made`
-                  : null}
-          </p>
-        </div>
+      {/* ── Pick count ── */}
+      {!isValid && selections.length > 0 && (
+        <p className="small muted" style={{ marginTop: 4, textAlign: "center" }}>
+          {selections.length} of {totalTiers} picks made
+        </p>
+      )}
+      {saveState === "error" && (
+        <p className="small" style={{ marginTop: 4, textAlign: "center", color: "var(--error, #c00)" }}>
+          Could not save — check your connection
+        </p>
       )}
     </div>
   );
