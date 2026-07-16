@@ -584,6 +584,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       async importTournamentFeed(tournament, golfers) {
         const supabase = await getSupabaseBrowserClient();
 
+        // Preserve live scores before wiping the field. When odds are refreshed
+        // (re-importing the same tournament), scores that ESPN/cron already wrote
+        // must not be zeroed out. Match by golfer ID first (stable for ESPN),
+        // then by normalized name as a cross-source fallback.
+        const { data: existingRows } = await supabase
+          .from("golfers")
+          .select("id, name, current_score_to_par, position, made_cut, rounds_complete")
+          .eq("tournament_id", tournament.id);
+
+        function normForPreserve(s: string): string {
+          return s.toLowerCase().replace(/\s+/g, " ").trim();
+        }
+        type LiveScore = { score: number; position: string; madeCut: boolean; rounds: number };
+        const liveById = new Map<string, LiveScore>();
+        const liveByName = new Map<string, LiveScore>();
+        for (const r of existingRows ?? []) {
+          if ((r.rounds_complete as number) > 0 || (r.current_score_to_par as number) !== 0) {
+            const data: LiveScore = {
+              score: r.current_score_to_par as number,
+              position: r.position as string,
+              madeCut: r.made_cut as boolean,
+              rounds: r.rounds_complete as number,
+            };
+            liveById.set(r.id as string, data);
+            liveByName.set(normForPreserve(r.name as string), data);
+          }
+        }
+
         await supabase.from("tournaments").upsert(
           {
             id: tournament.id,
@@ -604,17 +632,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (golfers.length > 0) {
           await supabase.from("golfers").upsert(
-            golfers.map((g) => ({
-              id: g.id,
-              tournament_id: g.tournamentId,
-              name: g.name,
-              odds_american: g.oddsAmerican,
-              implied_probability: g.impliedProbability,
-              current_score_to_par: g.currentScoreToPar,
-              position: g.position,
-              made_cut: g.madeCut,
-              rounds_complete: g.roundsComplete,
-            })),
+            golfers.map((g) => {
+              const live = liveById.get(g.id) ?? liveByName.get(normForPreserve(g.name));
+              return {
+                id: g.id,
+                tournament_id: g.tournamentId,
+                name: g.name,
+                odds_american: g.oddsAmerican,
+                implied_probability: g.impliedProbability,
+                current_score_to_par: live?.score ?? g.currentScoreToPar,
+                position: live?.position ?? g.position,
+                made_cut: live?.madeCut ?? g.madeCut,
+                rounds_complete: live?.rounds ?? g.roundsComplete,
+              };
+            }),
             { onConflict: "id" },
           );
         }
